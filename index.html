@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>HIRA Connect · CRM Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+:root{--navy:#0F1C33;--gold:#C9942A;--blue:#2E6BD6;--bg:#F4F6FA;--line:#E3E8F0;--red:#C0392B;--green:#1E8E5A}
+*{box-sizing:border-box;margin:0}body{font-family:Inter,sans-serif;background:var(--bg);color:var(--navy);font-size:14px}
+h1,h2,h3{font-family:Sora,sans-serif}
+.topbar{background:var(--navy);color:#fff;padding:12px 24px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.logo{font-family:Sora;font-weight:700;font-size:17px}.logo span{color:var(--gold)}
+.nav{display:flex;gap:4px;flex-wrap:wrap}
+.nav button{background:none;border:0;color:#B9C4D6;padding:8px 14px;border-radius:8px;cursor:pointer;font:inherit;font-weight:500}
+.nav button.on{background:var(--blue);color:#fff}
+.right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:12px;color:#B9C4D6}
+.right button{background:none;border:1px solid #3A4A66;color:#B9C4D6;border-radius:6px;padding:5px 10px;cursor:pointer}
+main{max-width:1200px;margin:24px auto;padding:0 20px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:22px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px}
+.card .n{font-family:Sora;font-size:26px;font-weight:700}.card .l{font-size:12px;color:#5A6B85;margin-top:2px}
+.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:20px;overflow-x:auto}
+.panel h3{font-size:15px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:#5A6B85;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:8px;border-bottom:2px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:hover td{background:#F8FAFD}
+select,input,textarea{font:inherit;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--navy)}
+select:focus,input:focus{outline:2px solid var(--blue)}
+.btn{background:var(--blue);color:#fff;border:0;border-radius:8px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer}
+.btn.gold{background:var(--gold)}.btn.sm{padding:5px 10px;font-size:12px}
+.badge{display:inline-block;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600;background:#EAF0FB;color:var(--blue)}
+.badge.won{background:#E4F5EC;color:var(--green)}.badge.lost{background:#FBEAEA;color:var(--red)}.badge.warn{background:#FBF3E4;color:#9A7213}
+.due{color:var(--red);font-weight:600}
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--navy)}
+.loginbox{background:#fff;border-radius:16px;padding:36px;width:360px}
+.loginbox h1{font-size:20px;margin-bottom:4px}.loginbox p{color:#5A6B85;font-size:13px;margin-bottom:20px}
+.loginbox input{width:100%;margin-bottom:12px}.loginbox .btn{width:100%}
+.err{color:var(--red);font-size:12px;margin-bottom:10px}
+.formrow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}.formrow input,.formrow select{flex:1;min-width:140px}
+.bar{height:8px;background:#EAF0FB;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:var(--blue)}
+.muted{color:#5A6B85;font-size:12px}
+a{color:var(--blue)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { h, render } from 'https://esm.sh/preact@10.19.3';
+import { useState, useEffect } from 'https://esm.sh/preact@10.19.3/hooks';
+import htm from 'https://esm.sh/htm@3.1.1';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+const html = htm.bind(h);
+const sb = createClient('https://tcojgrxtpldiieytvthl.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRjb2pncnh0cGxkaWlleXR2dGhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMyNzM4MTQsImV4cCI6MjA5ODg0OTgxNH0.gK9xcHIbrBSnFVKIAYDjLyZQtUhXoQjaftFU8sN9swA');
+const STAGES=['New','Contacted','Follow Up','Meeting Scheduled','Meeting Done','Demo Setup','Demo Done','Onboarding','Won','Delayed','Lost'];
+const today=()=>new Date().toISOString().slice(0,10);
+const badge=s=>s==='Won'?'badge won':(s==='Lost'?'badge lost':(s==='Delayed'?'badge warn':'badge'));
+
+function Login(){
+  const [em,setEm]=useState('');const [pw,setPw]=useState('');const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
+  const go=async()=>{setBusy(true);setErr('');const {error}=await sb.auth.signInWithPassword({email:em,password:pw});setBusy(false);if(error)setErr(error.message);};
+  return html`<div class="login"><div class="loginbox">
+    <h1>HIRA <span style="color:var(--gold)">Connect</span></h1><p>CRM &amp; Business Planning Portal</p>
+    ${err&&html`<div class="err">${err}</div>`}
+    <input placeholder="Email" value=${em} onInput=${e=>setEm(e.target.value)}/>
+    <input type="password" placeholder="Password" value=${pw} onInput=${e=>setPw(e.target.value)} onKeyDown=${e=>e.key==='Enter'&&go()}/>
+    <button class="btn" disabled=${busy} onClick=${go}>${busy?'Signing in…':'Sign in'}</button>
+  </div></div>`;
+}
+
+function Dashboard({leads,signups,targets}){
+  const t=today();
+  const open=leads.filter(l=>!['Won','Lost'].includes(l.status));
+  const overdue=open.filter(l=>l.next_action_date&&l.next_action_date<t);
+  const dueToday=open.filter(l=>l.next_action_date===t);
+  const counts=STAGES.map(s=>({s,n:leads.filter(l=>l.status===s).length})).filter(x=>x.n);
+  return html`<div>
+    <div class="cards">
+      <div class="card"><div class="n">${leads.length}</div><div class="l">Total leads</div></div>
+      <div class="card"><div class="n">${open.length}</div><div class="l">Open pipeline</div></div>
+      <div class="card"><div class="n" style="color:var(--red)">${overdue.length}</div><div class="l">Overdue follow-ups</div></div>
+      <div class="card"><div class="n" style="color:var(--gold)">${dueToday.length}</div><div class="l">Due today</div></div>
+      <div class="card"><div class="n">${signups.length}</div><div class="l">Website signups</div></div>
+    </div>
+    <div class="panel"><h3>Follow-up queue (overdue + today)</h3>
+      ${overdue.length+dueToday.length===0?html`<div class="muted">Nothing due. Clean slate.</div>`:
+      html`<table><tr><th>Lead</th><th>Stage</th><th>Next action</th><th>Date</th></tr>
+      ${[...overdue,...dueToday].map(l=>html`<tr><td><b>${l.name}</b><div class="muted">${l.companies?l.companies.name:''}</div></td>
+      <td><span class=${badge(l.status)}>${l.status}</span></td><td>${l.next_action||'—'}</td>
+      <td class=${l.next_action_date<t?'due':''}>${l.next_action_date}</td></tr>`)}</table>`}
+    </div>
+    <div class="panel"><h3>Pipeline by stage</h3><table>${counts.map(c=>html`<tr><td style="width:180px">${c.s}</td>
+      <td><div class="bar" style="max-width:420px"><i style=${'width:'+Math.min(100,c.n/leads.length*200)+'%'}></i></div></td><td style="width:40px"><b>${c.n}</b></td></tr>`)}</table>
+    </div>
+    <div class="panel"><h3>Monthly targets</h3><table><tr><th>Metric</th><th>Target</th><th>Actual</th><th>Progress</th></tr>
+      ${targets.map(x=>{const p=x.target_value>0?Math.min(100,Math.round(x.actual_value/x.target_value*100)):0;
+      return html`<tr><td>${x.metric}</td><td>${x.target_value}</td><td>${x.actual_value}</td>
+      <td><div class="bar" style="max-width:200px"><i style=${'width:'+p+'%;background:'+(p>=100?'var(--green)':'var(--blue)')}></i></div><span class="muted">${p}%</span></td></tr>`})}
+    </table></div>
+  </div>`;
+}
+
+function Leads({leads,companies,reload}){
+  const blank={name:'',company_id:'',title:'',email:'',phone:'',status:'New',next_action:'',next_action_date:''};
+  const [f,setF]=useState(blank);
+  const [q,setQ]=useState('');const [note,setNote]=useState({});
+  const setStage=async(id,status)=>{await sb.from('leads').update({status}).eq('id',id);reload();};
+  const setDate=async(id,d)=>{await sb.from('leads').update({next_action_date:d||null}).eq('id',id);reload();};
+  const bump=async(l)=>{await sb.from('leads').update({total_reachouts:(l.total_reachouts||0)+1}).eq('id',l.id);reload();};
+  const logNote=async(id)=>{const n=note[id];if(!n)return;await sb.from('activities').insert({lead_id:id,type:'Note',notes:n});const nn=Object.assign({},note);nn[id]='';setNote(nn);reload();};
+  const add=async()=>{if(!f.name)return;const r=Object.assign({},f);if(!r.company_id)delete r.company_id;if(!r.next_action_date)delete r.next_action_date;
+    await sb.from('leads').insert(r);setF(blank);reload();};
+  const list=leads.filter(l=>(l.name+' '+(l.companies?l.companies.name:'')+' '+(l.email||'')).toLowerCase().includes(q.toLowerCase()));
+  return html`<div>
+    <div class="panel"><h3>Add lead</h3>
+      <div class="formrow">
+        <input placeholder="Name *" value=${f.name} onInput=${e=>setF(Object.assign({},f,{name:e.target.value}))}/>
+        <select value=${f.company_id} onChange=${e=>setF(Object.assign({},f,{company_id:e.target.value}))}><option value="">— company —</option>${companies.map(c=>html`<option value=${c.id}>${c.name}</option>`)}</select>
+        <input placeholder="Title" value=${f.title} onInput=${e=>setF(Object.assign({},f,{title:e.target.value}))}/>
+      </div>
+      <div class="formrow">
+        <input placeholder="Email" value=${f.email} onInput=${e=>setF(Object.assign({},f,{email:e.target.value}))}/>
+        <input placeholder="Phone" value=${f.phone} onInput=${e=>setF(Object.assign({},f,{phone:e.target.value}))}/>
+        <input placeholder="Next action" value=${f.next_action} onInput=${e=>setF(Object.assign({},f,{next_action:e.target.value}))}/>
+        <input type="date" value=${f.next_action_date} onInput=${e=>setF(Object.assign({},f,{next_action_date:e.target.value}))}/>
+        <button class="btn" onClick=${add}>Add</button>
+      </div>
+    </div>
+    <div class="panel"><h3 style="display:flex;gap:12px;align-items:center">Leads (${list.length}) <input style="font-weight:400" placeholder="Search…" value=${q} onInput=${e=>setQ(e.target.value)}/></h3>
+      <table><tr><th>Lead</th><th>Contact</th><th>Stage</th><th>Follow-up</th><th>Reachouts</th><th>Quick note</th></tr>
+      ${list.map(l=>html`<tr>
+        <td><b>${l.name}</b><div class="muted">${l.companies?l.companies.name:''} ${l.title?'· '+l.title:''}</div></td>
+        <td class="muted">${l.email||''}<br/>${l.phone||''}</td>
+        <td><select value=${l.status} onChange=${e=>setStage(l.id,e.target.value)}>${STAGES.map(s=>html`<option>${s}</option>`)}</select></td>
+        <td><input type="date" value=${l.next_action_date||''} onChange=${e=>setDate(l.id,e.target.value)} class=${l.next_action_date&&l.next_action_date<today()?'due':''}/><div class="muted">${l.next_action||''}</div></td>
+        <td style="text-align:center">${l.total_reachouts||0} <button class="btn sm" onClick=${()=>bump(l)}>+1</button></td>
+        <td><input placeholder="Log note + Enter" value=${note[l.id]||''} onInput=${e=>{const nn=Object.assign({},note);nn[l.id]=e.target.value;setNote(nn);}} onKeyDown=${e=>e.key==='Enter'&&logNote(l.id)}/></td>
+      </tr>`)}</table>
+    </div>
+  </div>`;
+}
+
+function Companies({companies,leads,reload}){
+  const blank={name:'',website:'',location:'',industry:''};
+  const [f,setF]=useState(blank);
+  const add=async()=>{if(!f.name)return;await sb.from('companies').insert(f);setF(blank);reload();};
+  return html`<div>
+    <div class="panel"><h3>Add company</h3><div class="formrow">
+      <input placeholder="Name *" value=${f.name} onInput=${e=>setF(Object.assign({},f,{name:e.target.value}))}/>
+      <input placeholder="Website" value=${f.website} onInput=${e=>setF(Object.assign({},f,{website:e.target.value}))}/>
+      <input placeholder="Location" value=${f.location} onInput=${e=>setF(Object.assign({},f,{location:e.target.value}))}/>
+      <input placeholder="Industry" value=${f.industry} onInput=${e=>setF(Object.assign({},f,{industry:e.target.value}))}/>
+      <button class="btn" onClick=${add}>Add</button></div></div>
+    <div class="panel"><h3>Companies (${companies.length})</h3>
+      <table><tr><th>Name</th><th>Website</th><th>Location</th><th>Industry</th><th>Leads</th></tr>
+      ${companies.map(c=>html`<tr><td><b>${c.name}</b></td>
+      <td>${c.website?html`<a href=${c.website.indexOf('http')===0?c.website:'https://'+c.website} target="_blank">${c.website}</a>`:''}</td>
+      <td>${c.location||''}</td><td>${c.industry||''}</td>
+      <td>${leads.filter(l=>l.company_id===c.id).length}</td></tr>`)}</table></div>
+  </div>`;
+}
+
+function Signups({signups,reload}){
+  const [ft,setFt]=useState('All');
+  const types=['All'].concat(Array.from(new Set(signups.map(s=>s.submit_type).filter(Boolean))));
+  const convert=async(s)=>{const r=await sb.from('leads').insert({name:s.name||s.email,email:s.email,source:'Website Signup',status:'New'}).select().single();
+    if(!r.error&&r.data){await sb.from('raw_signups').update({converted_lead_id:r.data.id}).eq('id',s.id);}reload();};
+  const list=signups.filter(s=>ft==='All'||s.submit_type===ft);
+  return html`<div class="panel"><h3 style="display:flex;gap:12px;align-items:center">Website signups (${list.length})
+    <select style="font-weight:400" value=${ft} onChange=${e=>setFt(e.target.value)}>${types.map(t=>html`<option>${t}</option>`)}</select></h3>
+    <table><tr><th>Submitted</th><th>Name</th><th>Email</th><th>Type</th><th>Source</th><th></th></tr>
+    ${list.map(s=>html`<tr><td class="muted">${(s.submitted_at||s.created_at||'').slice(0,10)}</td>
+    <td>${s.name||'—'}</td><td>${s.email}</td><td><span class="badge">${s.submit_type||'—'}</span></td><td class="muted">${s.source||''}</td>
+    <td>${s.converted_lead_id?html`<span class="badge won">Converted</span>`:html`<button class="btn sm gold" onClick=${()=>convert(s)}>Convert to lead</button>`}</td></tr>`)}</table></div>`;
+}
+
+function Targets({targets,reload}){
+  const upd=async(id,field,val)=>{const o={};o[field]=Number(val)||0;await sb.from('monthly_targets').update(o).eq('id',id);reload();};
+  return html`<div class="panel"><h3>Monthly targets</h3>
+    <table><tr><th>Month</th><th>Metric</th><th>Target</th><th>Actual</th><th>Progress</th></tr>
+    ${targets.map(x=>{const p=x.target_value>0?Math.min(100,Math.round(x.actual_value/x.target_value*100)):0;
+    return html`<tr><td>${(x.month||'').slice(0,7)}</td><td><b>${x.metric}</b></td>
+    <td><input type="number" style="width:90px" value=${x.target_value} onChange=${e=>upd(x.id,'target_value',e.target.value)}/></td>
+    <td><input type="number" style="width:90px" value=${x.actual_value} onChange=${e=>upd(x.id,'actual_value',e.target.value)}/></td>
+    <td><div class="bar" style="max-width:220px"><i style=${'width:'+p+'%;background:'+(p>=100?'var(--green)':'var(--blue)')}></i></div><span class="muted">${p}%</span></td></tr>`})}
+    </table></div>`;
+}
+
+function App(){
+  const [session,setSession]=useState(undefined);
+  const [tab,setTab]=useState('Dashboard');
+  const [leads,setLeads]=useState([]);const [companies,setCompanies]=useState([]);
+  const [signups,setSignups]=useState([]);const [targets,setTargets]=useState([]);
+  const reload=async()=>{
+    const res=await Promise.all([
+      sb.from('leads').select('*, companies(name)').order('created_at',{ascending:false}),
+      sb.from('companies').select('*').order('name'),
+      sb.from('raw_signups').select('*').order('submitted_at',{ascending:false}),
+      sb.from('monthly_targets').select('*').order('month').order('metric')
+    ]);
+    setLeads(res[0].data||[]);setCompanies(res[1].data||[]);setSignups(res[2].data||[]);setTargets(res[3].data||[]);
+  };
+  useEffect(()=>{sb.auth.getSession().then(r=>{setSession(r.data.session);if(r.data.session)reload();});
+    sb.auth.onAuthStateChange((_e,s)=>{setSession(s);if(s)reload();});},[]);
+  if(session===undefined)return html`<div class="login"><div style="color:#fff;font-family:Sora">Loading…</div></div>`;
+  if(!session)return html`<${Login}/>`;
+  const tabs={Dashboard:html`<${Dashboard} leads=${leads} signups=${signups} targets=${targets}/>`,
+    Leads:html`<${Leads} leads=${leads} companies=${companies} reload=${reload}/>`,
+    Companies:html`<${Companies} companies=${companies} leads=${leads} reload=${reload}/>`,
+    Signups:html`<${Signups} signups=${signups} reload=${reload}/>`,
+    Targets:html`<${Targets} targets=${targets} reload=${reload}/>`};
+  return html`<div>
+    <div class="topbar"><div class="logo">HIRA <span>Connect</span></div>
+      <div class="nav">${Object.keys(tabs).map(t=>html`<button class=${tab===t?'on':''} onClick=${()=>setTab(t)}>${t}</button>`)}</div>
+      <div class="right"><span>${session.user.email}</span><button onClick=${()=>sb.auth.signOut()}>Sign out</button></div>
+    </div>
+    <main>${tabs[tab]}</main>
+  </div>`;
+}
+render(h(App),document.getElementById('app'));
+</script>
+</body></html>
