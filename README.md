@@ -183,8 +183,22 @@ the public website writes into `raw_signups`, and re-policing it could silently 
 
 ## Deploying
 
-Vercel builds this repo as a Next.js app — no `vercel.json` needed. Run through this in order; steps 1–3
-must happen **before** production traffic hits the new build.
+Vercel builds this repo as a Next.js app. [`vercel.json`](vercel.json) pins `framework: "nextjs"`, which
+**overrides the dashboard preset** — the project was originally created for the v1 static `index.html`, so
+without it Vercel runs a build and then fails looking for a `public/` directory that Next.js never
+produces (*"No Output Directory named public found"*).
+
+If that error persists after this file lands, the project also has an explicit **Output Directory**
+override in the dashboard, which `vercel.json` cannot clear by omission. Reset it with:
+
+```bash
+vercel project update --framework nextjs --auto-detect output-directory --auto-detect build-command
+```
+
+or in Settings → Build & Deployment, switch Framework Preset to **Next.js** and turn the Output Directory
+override off.
+
+Run through the rest in order; steps 1–3 must happen **before** production traffic hits the new build.
 
 **1. Apply the migrations.**
 
