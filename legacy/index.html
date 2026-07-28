@@ -42,6 +42,23 @@ select:focus,input:focus{outline:2px solid var(--blue)}
 .bar{height:8px;background:#EAF0FB;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:var(--blue)}
 .muted{color:#5A6B85;font-size:12px}
 a{color:var(--blue)}
+.link{color:var(--blue);cursor:pointer;font-weight:600}.link:hover{text-decoration:underline}
+.drawer-bg{position:fixed;inset:0;background:rgba(15,28,51,.45);z-index:40}
+.drawer{position:fixed;top:0;right:0;height:100vh;width:480px;max-width:100vw;background:#fff;z-index:41;box-shadow:-8px 0 30px rgba(0,0,0,.18);display:flex;flex-direction:column}
+.drawer .dhead{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;align-items:flex-start;gap:10px}
+.drawer .dbody{padding:16px 18px;overflow-y:auto;flex:1}
+.drawer .sec{margin-bottom:18px}
+.drawer .sec h4{font-family:Sora;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#5A6B85;margin-bottom:8px}
+.x{margin-left:auto;background:none;border:0;font-size:22px;line-height:1;cursor:pointer;color:#5A6B85}
+.seg{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.seg button{padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;font:inherit;font-size:12px}
+.seg button.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.kv{display:flex;gap:8px;font-size:13px;margin-bottom:4px}.kv b{min-width:74px;color:#5A6B85;font-weight:600}
+.tl{list-style:none;padding:0;margin:0}
+.tl li{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.tl .ico{width:28px;height:28px;border-radius:50%;background:#EAF0FB;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px}
+.tl .meta{font-size:11px;color:#5A6B85;margin-top:2px}
+.tl .tt{font-size:13px}
 </style>
 </head>
 <body>
@@ -57,6 +74,36 @@ const STAGES=['New','Contacted','Follow Up','Meeting Scheduled','Meeting Done','
 const today=()=>new Date().toISOString().slice(0,10);
 const badge=s=>s==='Won'?'badge won':(s==='Lost'?'badge lost':(s==='Delayed'?'badge warn':'badge'));
 
+// ---- Activity / lifecycle model (Phase 1) ----
+let ME='';                       // current user email, set on auth
+const ACT_ICON={Note:'📝',Call:'📞',Email:'✉️',WhatsApp:'💬',Meeting:'🤝',Demo:'🖥️',Task:'✅',StageChange:'↗️'};
+const ACT_TYPES=['Call','Email','WhatsApp','Meeting','Demo','Note','Task'];
+const TOUCH=['Call','Email','WhatsApp','Meeting','Demo']; // real outreach → bumps reachouts
+function relTime(ts){
+  if(!ts)return '';const d=new Date(ts),s=(Date.now()-d.getTime())/1000;
+  if(s<60)return 'just now';if(s<3600)return Math.floor(s/60)+'m ago';
+  if(s<86400)return Math.floor(s/3600)+'h ago';if(s<604800)return Math.floor(s/86400)+'d ago';
+  return d.toISOString().slice(0,10);
+}
+async function logActivity(leadId,a){
+  const row=Object.assign({lead_id:leadId,author:ME},a);
+  await sb.from('activities').insert(row);
+  const patch={last_activity_at:new Date().toISOString()};
+  if(TOUCH.includes(a.type)){
+    const {data}=await sb.from('leads').select('total_reachouts').eq('id',leadId).single();
+    patch.total_reachouts=((data&&data.total_reachouts)||0)+1;
+  }
+  await sb.from('leads').update(patch).eq('id',leadId);
+}
+async function changeStage(lead,to,note){
+  if(to===lead.status)return;
+  const patch={status:to,stage_since:today()};
+  if((to==='Lost'||to==='Delayed')&&note)patch.lost_reason=note;
+  await sb.from('leads').update(patch).eq('id',lead.id);
+  await sb.from('stage_history').insert({lead_id:lead.id,from_stage:lead.status,to_stage:to,note:note||null,changed_by:ME});
+  await sb.from('activities').insert({lead_id:lead.id,type:'StageChange',notes:note||null,outcome:lead.status+' → '+to,author:ME});
+}
+
 function Login(){
   const [em,setEm]=useState('');const [pw,setPw]=useState('');const [err,setErr]=useState('');const [busy,setBusy]=useState(false);
   const go=async()=>{setBusy(true);setErr('');const {error}=await sb.auth.signInWithPassword({email:em,password:pw});setBusy(false);if(error)setErr(error.message);};
@@ -69,7 +116,7 @@ function Login(){
   </div></div>`;
 }
 
-function Dashboard({leads,signups,targets}){
+function Dashboard({leads,signups,targets,onOpen}){
   const t=today();
   const open=leads.filter(l=>!['Won','Lost'].includes(l.status));
   const overdue=open.filter(l=>l.next_action_date&&l.next_action_date<t);
@@ -86,7 +133,7 @@ function Dashboard({leads,signups,targets}){
     <div class="panel"><h3>Follow-up queue (overdue + today)</h3>
       ${overdue.length+dueToday.length===0?html`<div class="muted">Nothing due. Clean slate.</div>`:
       html`<table><tr><th>Lead</th><th>Stage</th><th>Next action</th><th>Date</th></tr>
-      ${[...overdue,...dueToday].map(l=>html`<tr><td><b>${l.name}</b><div class="muted">${l.companies?l.companies.name:''}</div></td>
+      ${[...overdue,...dueToday].map(l=>html`<tr><td><span class="link" onClick=${()=>onOpen(l.id)}>${l.name}</span><div class="muted">${l.companies?l.companies.name:''}</div></td>
       <td><span class=${badge(l.status)}>${l.status}</span></td><td>${l.next_action||'—'}</td>
       <td class=${l.next_action_date<t?'due':''}>${l.next_action_date}</td></tr>`)}</table>`}
     </div>
@@ -101,14 +148,14 @@ function Dashboard({leads,signups,targets}){
   </div>`;
 }
 
-function Leads({leads,companies,reload}){
+function Leads({leads,companies,reload,onOpen}){
   const blank={name:'',company_id:'',title:'',email:'',phone:'',status:'New',next_action:'',next_action_date:''};
   const [f,setF]=useState(blank);
   const [q,setQ]=useState('');const [note,setNote]=useState({});
-  const setStage=async(id,status)=>{await sb.from('leads').update({status}).eq('id',id);reload();};
+  const setStage=async(l,status)=>{if(status===l.status)return;let n='';if(status==='Lost'||status==='Delayed'){n=window.prompt('Reason? (Price, Timing, No budget, Went silent, Competitor, Not a fit, No response)')||'';}await changeStage(l,status,n);reload();};
   const setDate=async(id,d)=>{await sb.from('leads').update({next_action_date:d||null}).eq('id',id);reload();};
-  const bump=async(l)=>{await sb.from('leads').update({total_reachouts:(l.total_reachouts||0)+1}).eq('id',l.id);reload();};
-  const logNote=async(id)=>{const n=note[id];if(!n)return;await sb.from('activities').insert({lead_id:id,type:'Note',notes:n});const nn=Object.assign({},note);nn[id]='';setNote(nn);reload();};
+  const bump=async(l)=>{await logActivity(l.id,{type:'Call',outcome:'Quick +1 touch',direction:'out'});reload();};
+  const logNote=async(id)=>{const n=note[id];if(!n)return;await logActivity(id,{type:'Note',notes:n});const nn=Object.assign({},note);nn[id]='';setNote(nn);reload();};
   const add=async()=>{if(!f.name)return;const r=Object.assign({},f);if(!r.company_id)delete r.company_id;if(!r.next_action_date)delete r.next_action_date;
     await sb.from('leads').insert(r);setF(blank);reload();};
   const list=leads.filter(l=>(l.name+' '+(l.companies?l.companies.name:'')+' '+(l.email||'')).toLowerCase().includes(q.toLowerCase()));
@@ -130,9 +177,9 @@ function Leads({leads,companies,reload}){
     <div class="panel"><h3 style="display:flex;gap:12px;align-items:center">Leads (${list.length}) <input style="font-weight:400" placeholder="Search…" value=${q} onInput=${e=>setQ(e.target.value)}/></h3>
       <table><tr><th>Lead</th><th>Contact</th><th>Stage</th><th>Follow-up</th><th>Reachouts</th><th>Quick note</th></tr>
       ${list.map(l=>html`<tr>
-        <td><b>${l.name}</b><div class="muted">${l.companies?l.companies.name:''} ${l.title?'· '+l.title:''}</div></td>
+        <td><span class="link" onClick=${()=>onOpen(l.id)}>${l.name}</span><div class="muted">${l.companies?l.companies.name:''} ${l.title?'· '+l.title:''}</div></td>
         <td class="muted">${l.email||''}<br/>${l.phone||''}</td>
-        <td><select value=${l.status} onChange=${e=>setStage(l.id,e.target.value)}>${STAGES.map(s=>html`<option>${s}</option>`)}</select></td>
+        <td><select value=${l.status} onChange=${e=>setStage(l,e.target.value)}>${STAGES.map(s=>html`<option>${s}</option>`)}</select></td>
         <td><input type="date" value=${l.next_action_date||''} onChange=${e=>setDate(l.id,e.target.value)} class=${l.next_action_date&&l.next_action_date<today()?'due':''}/><div class="muted">${l.next_action||''}</div></td>
         <td style="text-align:center">${l.total_reachouts||0} <button class="btn sm" onClick=${()=>bump(l)}>+1</button></td>
         <td><input placeholder="Log note + Enter" value=${note[l.id]||''} onInput=${e=>{const nn=Object.assign({},note);nn[l.id]=e.target.value;setNote(nn);}} onKeyDown=${e=>e.key==='Enter'&&logNote(l.id)}/></td>
@@ -187,11 +234,98 @@ function Targets({targets,reload}){
     </table></div>`;
 }
 
+function LeadDrawer({lead,reload,onClose}){
+  const [items,setItems]=useState(null);
+  const [comp,setComp]=useState({type:'Call',notes:'',outcome:'',direction:'out',due_date:''});
+  const [stage,setStage]=useState(lead.status);const [snote,setSnote]=useState('');
+  const load=async()=>{
+    const [a,s]=await Promise.all([
+      sb.from('activities').select('*').eq('lead_id',lead.id).order('created_at',{ascending:false}),
+      sb.from('stage_history').select('*').eq('lead_id',lead.id).order('changed_at',{ascending:false})
+    ]);
+    const merged=[...(a.data||[]).map(x=>({t:x.created_at,x,kind:'a'})),
+      ...(s.data||[]).map(x=>({t:x.changed_at,x,kind:'s'}))].sort((p,q)=>new Date(q.t)-new Date(p.t));
+    setItems(merged);
+  };
+  useEffect(()=>{setStage(lead.status);load();},[lead.id]);
+  const submit=async()=>{
+    if(comp.type==='Note'&&!comp.notes.trim())return;
+    const a={type:comp.type,notes:comp.notes||null,outcome:comp.outcome||null,direction:comp.direction};
+    if(comp.type==='Task'){a.due_date=comp.due_date||null;a.done=false;}
+    await logActivity(lead.id,a);
+    setComp({type:'Call',notes:'',outcome:'',direction:'out',due_date:''});
+    await load();reload();
+  };
+  const move=async()=>{
+    if(stage===lead.status)return;
+    let note=snote;
+    if((stage==='Lost'||stage==='Delayed')&&!note){note=window.prompt('Reason? (Price, Timing, No budget, Went silent, Competitor, Not a fit, No response)')||'';}
+    await changeStage(lead,stage,note);setSnote('');await load();reload();
+  };
+  const toggleTask=async(it)=>{await sb.from('activities').update({done:!it.done}).eq('id',it.id);await load();};
+  const c=lead.companies;
+  return html`<div class="drawer-bg" onClick=${onClose}></div>
+   <div class="drawer">
+    <div class="dhead">
+      <div><h3 style="font-size:17px">${lead.name}</h3>
+        <div class="muted">${c?c.name:''} ${lead.title?'· '+lead.title:''}</div>
+        <div style="margin-top:6px"><span class=${badge(lead.status)}>${lead.status}</span>
+          <span class="muted"> · in stage since ${lead.stage_since||'—'}</span></div>
+      </div>
+      <button class="x" onClick=${onClose}>×</button>
+    </div>
+    <div class="dbody">
+      <div class="sec">
+        <div class="kv"><b>Email</b><span>${lead.email||'—'}</span></div>
+        <div class="kv"><b>Phone</b><span>${lead.phone||'—'}</span></div>
+        <div class="kv"><b>WhatsApp</b><span>${lead.whatsapp||'—'}</span></div>
+        <div class="kv"><b>LinkedIn</b><span>${lead.linkedin?html`<a href=${lead.linkedin} target="_blank">profile</a>`:'—'}</span></div>
+        <div class="kv"><b>Owner</b><span>${lead.owner||'—'}</span></div>
+        <div class="kv"><b>Source</b><span>${lead.source||'—'}</span></div>
+        <div class="kv"><b>Reachouts</b><span>${lead.total_reachouts||0}</span></div>
+        <div class="kv"><b>Last touch</b><span>${lead.last_activity_at?relTime(lead.last_activity_at):'—'}</span></div>
+      </div>
+      <div class="sec">
+        <h4>Move stage / feedback</h4>
+        <div class="formrow" style="margin-bottom:6px">
+          <select value=${stage} onChange=${e=>setStage(e.target.value)}>${STAGES.map(s=>html`<option>${s}</option>`)}</select>
+          <button class="btn" onClick=${move} disabled=${stage===lead.status}>Update</button>
+        </div>
+        <input placeholder="What happened / next step (logged to history)" value=${snote} onInput=${e=>setSnote(e.target.value)} style="width:100%"/>
+      </div>
+      <div class="sec">
+        <h4>Log activity</h4>
+        <div class="seg">${ACT_TYPES.map(t=>html`<button class=${comp.type===t?'on':''} onClick=${()=>setComp(Object.assign({},comp,{type:t}))}>${ACT_ICON[t]} ${t}</button>`)}</div>
+        <textarea placeholder=${comp.type==='Task'?'Task description':'Notes'} value=${comp.notes} onInput=${e=>setComp(Object.assign({},comp,{notes:e.target.value}))} style="width:100%;min-height:52px;margin-bottom:6px"></textarea>
+        <div class="formrow" style="margin-bottom:6px">
+          ${comp.type==='Task'?html`<input type="date" value=${comp.due_date} onInput=${e=>setComp(Object.assign({},comp,{due_date:e.target.value}))}/>`
+            :html`<select value=${comp.direction} onChange=${e=>setComp(Object.assign({},comp,{direction:e.target.value}))}><option value="out">Outbound</option><option value="in">Inbound</option></select>
+            <input placeholder="Outcome (e.g. Interested, No answer)" value=${comp.outcome} onInput=${e=>setComp(Object.assign({},comp,{outcome:e.target.value}))}/>`}
+          <button class="btn" onClick=${submit}>Log</button>
+        </div>
+      </div>
+      <div class="sec">
+        <h4>Timeline</h4>
+        ${items===null?html`<div class="muted">Loading…</div>`:
+         items.length===0?html`<div class="muted">No activity yet. Log the first call or note above.</div>`:
+         html`<ul class="tl">${items.map(it=>it.kind==='s'?html`<li>
+            <div class="ico">↗️</div><div><div class="tt"><b>${it.x.from_stage?it.x.from_stage+' → ':''}${it.x.to_stage}</b>${it.x.note?html` — ${it.x.note}`:''}</div>
+            <div class="meta">${it.x.changed_by||'system'} · ${relTime(it.x.changed_at)}</div></div></li>`
+          :html`<li><div class="ico">${ACT_ICON[it.x.type]||'•'}</div>
+            <div style="flex:1"><div class="tt"><b>${it.x.type}</b>${it.x.direction?html` <span class="muted">${it.x.direction==='in'?'▼ in':'▲ out'}</span>`:''}${it.x.outcome?html` — ${it.x.outcome}`:''}${it.x.type==='Task'?html` <button class="btn sm ${it.x.done?'':'gold'}" onClick=${()=>toggleTask(it.x)}>${it.x.done?'Done':'Mark done'}</button>`:''}</div>
+            ${it.x.notes?html`<div class="muted" style="color:var(--navy)">${it.x.notes}</div>`:''}
+            <div class="meta">${it.x.author||''}${it.x.due_date?' · due '+it.x.due_date:''} · ${relTime(it.x.created_at)}</div></div></li>`)}</ul>`}
+      </div>
+    </div>
+   </div>`;
+}
+
 function App(){
   const [session,setSession]=useState(undefined);
   const [tab,setTab]=useState('Dashboard');
   const [leads,setLeads]=useState([]);const [companies,setCompanies]=useState([]);
   const [signups,setSignups]=useState([]);const [targets,setTargets]=useState([]);
+  const [openId,setOpenId]=useState(null);
   const reload=async()=>{
     const res=await Promise.all([
       sb.from('leads').select('*, companies(name)').order('created_at',{ascending:false}),
@@ -201,12 +335,13 @@ function App(){
     ]);
     setLeads(res[0].data||[]);setCompanies(res[1].data||[]);setSignups(res[2].data||[]);setTargets(res[3].data||[]);
   };
-  useEffect(()=>{sb.auth.getSession().then(r=>{setSession(r.data.session);if(r.data.session)reload();});
-    sb.auth.onAuthStateChange((_e,s)=>{setSession(s);if(s)reload();});},[]);
+  useEffect(()=>{sb.auth.getSession().then(r=>{ME=(r.data.session&&r.data.session.user.email)||'';setSession(r.data.session);if(r.data.session)reload();});
+    sb.auth.onAuthStateChange((_e,s)=>{ME=(s&&s.user.email)||'';setSession(s);if(s)reload();});},[]);
   if(session===undefined)return html`<div class="login"><div style="color:#fff;font-family:Sora">Loading…</div></div>`;
   if(!session)return html`<${Login}/>`;
-  const tabs={Dashboard:html`<${Dashboard} leads=${leads} signups=${signups} targets=${targets}/>`,
-    Leads:html`<${Leads} leads=${leads} companies=${companies} reload=${reload}/>`,
+  const openLead=leads.find(l=>l.id===openId);
+  const tabs={Dashboard:html`<${Dashboard} leads=${leads} signups=${signups} targets=${targets} onOpen=${setOpenId}/>`,
+    Leads:html`<${Leads} leads=${leads} companies=${companies} reload=${reload} onOpen=${setOpenId}/>`,
     Companies:html`<${Companies} companies=${companies} leads=${leads} reload=${reload}/>`,
     Signups:html`<${Signups} signups=${signups} reload=${reload}/>`,
     Targets:html`<${Targets} targets=${targets} reload=${reload}/>`};
@@ -216,6 +351,7 @@ function App(){
       <div class="right"><span>${session.user.email}</span><button onClick=${()=>sb.auth.signOut()}>Sign out</button></div>
     </div>
     <main>${tabs[tab]}</main>
+    ${openLead&&html`<${LeadDrawer} lead=${openLead} reload=${reload} onClose=${()=>setOpenId(null)}/>`}
   </div>`;
 }
 render(h(App),document.getElementById('app'));
