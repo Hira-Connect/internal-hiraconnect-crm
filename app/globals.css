@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* HIRA Connect brand tokens — navy structure, gold accent, blue action. */
+@theme {
+  --color-navy-50: #f4f6fa;
+  --color-navy-100: #e3e8f0;
+  --color-navy-200: #c8d2e2;
+  --color-navy-300: #9caed0;
+  --color-navy-400: #6b81ab;
+  --color-navy-500: #465c86;
+  --color-navy-600: #2f4269;
+  --color-navy-700: #1f2f4e;
+  --color-navy-800: #16233b;
+  --color-navy-900: #0f1c33;
+  --color-navy-950: #08111f;
+
+  --color-gold-100: #fbf3e4;
+  --color-gold-300: #e8c471;
+  --color-gold-500: #c9942a;
+  --color-gold-600: #a97a1c;
+
+  --color-brand-50: #eef3fc;
+  --color-brand-100: #dbe6fa;
+  --color-brand-500: #2e6bd6;
+  --color-brand-600: #2557b3;
+  --color-brand-700: #1d4590;
+
+  /* next/font injects --font-sora / --font-inter on <body> */
+  --font-display: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  :root {
+    --surface: #f4f6fa;
+    --panel: #ffffff;
+    --panel-alt: #f8fafd;
+    --border: #e3e8f0;
+    --text: #0f1c33;
+    --text-muted: #5a6b85;
+    color-scheme: light;
+  }
+
+  .dark {
+    --surface: #08111f;
+    --panel: #101d33;
+    --panel-alt: #16233b;
+    --border: #24344f;
+    --text: #e8eefb;
+    --text-muted: #93a4c0;
+    color-scheme: dark;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    font-weight: 600;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::placeholder {
+    color: var(--text-muted);
+    opacity: 0.85;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 1px;
+  }
+}
+
+@layer utilities {
+  .surface {
+    background: var(--panel);
+    border-color: var(--border);
+  }
+
+  .surface-alt {
+    background: var(--panel-alt);
+  }
+
+  .text-muted {
+    color: var(--text-muted);
+  }
+
+  .border-app {
+    border-color: var(--border);
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+  }
+
+  .scroll-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 99px;
+  }
+}
