@@ -25,6 +25,7 @@ npm run dev                    # http://localhost:3000
 | `npm test` | Unit tests for scoring, stages and analytics |
 | `npm run db:push` | Apply pending migrations to Supabase |
 | `npm run db:list` | Compare local and remote migration history |
+| `npm run setup:user` | Create a login (or reset its password) and set its role |
 
 > **First deploy of v2 must apply the database migrations first.** See
 > [Database](#database) — the app expects tables (`profiles`, `stages`, `contacts`, …) that the v2
@@ -172,6 +173,8 @@ and idempotent. They run in this order, and the order matters:
 2. `20260729120100_v2_backfill.sql` — **bootstraps every existing user as an admin**, derives contacts from
    leads, backfills lifecycle timestamps
 3. `20260729120200_v2_rls.sql` — replaces blanket authenticated access with role-scoped policies
+4. `20260729120300_v2_first_user_admin.sql` — the first account created while no admin exists becomes one,
+   so a fresh project cannot lock its own owner out
 
 Step 2 must run before step 3 or the team locks itself out. If scoped access causes a problem, restore the
 previous behaviour with `supabase/rollback/v2_rls_down.sql` — it touches policies only, never data.
@@ -239,6 +242,33 @@ talks to the same project.
 
 ### Accounts
 
-Create users in **Supabase → Authentication → Users**. A profile row appears automatically on first
-sign-in with the `rep` role; promote from the Team screen. Users can set their own password from the
-"Forgot your password?" link on sign-in, or **Settings → Change my password** once inside.
+The quickest path — creates the login, confirms the email, and sets the role in one step:
+
+```bash
+# add SUPABASE_SERVICE_ROLE_KEY to .env.local first (see .env.example)
+npm run setup:user -- --email you@hiraconnect.com --password 'your-password' --name 'Your Name' --role admin
+```
+
+Re-running it on an existing address **resets that account's password**, which is the fastest way to
+recover a locked-out user.
+
+You can also create users in **Supabase → Authentication → Users**, with two caveats the script exists to
+avoid:
+
+- tick **Auto Confirm User**, or sign-in fails with *"Email not confirmed"*
+- an account created **after** the migrations gets the `rep` role, and a rep has no route to the Team
+  screen to promote themselves. `20260729120300_v2_first_user_admin.sql` covers the *first* such account;
+  after that, an existing admin must promote people from **Team**.
+
+Users can change their own password from the "Forgot your password?" link on sign-in, or
+**Settings → Change my password** once inside.
+
+### Login troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| *Invalid login credentials* | The account does not exist — run `npm run setup:user`. |
+| *Email not confirmed* | Created via the dashboard without Auto Confirm. Re-run `setup:user` on the same address. |
+| Signs in, then every screen shows "could not load" | Migrations not applied. Run `supabase db push`. |
+| Signs in, but sees almost nothing | Profile role is `rep`. Promote from **Team**, or re-run `setup:user` with `--role admin`. |
+| Build fails on Vercel with a missing-env error | `NEXT_PUBLIC_SUPABASE_*` not set for that environment. The app fails fast by design. |

@@ -12,6 +12,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test lib/*.test.ts",
+    "setup:user": "tsx scripts/setup-user.ts",
     "db:push": "supabase db push",
     "db:list": "supabase migration list"
   },
