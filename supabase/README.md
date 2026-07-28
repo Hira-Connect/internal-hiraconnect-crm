@@ -67,12 +67,24 @@ The Phase 0 migrations were applied to the remote earlier (via MCP). They are **
 
 ```bash
 supabase migration list                 # compare local vs remote history
-# If remote already has the Phase 0 changes but history is empty, reconcile once:
-#   supabase migration repair --status applied 20260716120000
-#   supabase migration repair --status applied 20260716120100
-
 supabase db push                        # applies the pending v2 migrations, in order
+```
 
+**If `db push` refuses with "Remote migration versions not found in local migrations directory"**, the
+remote's `supabase_migrations.schema_migrations` bookkeeping table already lists some versions that have
+no matching file in this repo — the original app's tables were created with ad hoc SQL before this
+`supabase/` folder existed, and that history was never captured as files. The CLI's own error message
+names the exact versions; repair those, then push again:
+
+```bash
+supabase migration repair --status reverted <the versions the error listed>
+supabase db push
+```
+
+`repair` only edits that bookkeeping table — it does not touch schema or data. The tables those old runs
+created stay exactly as they are; this just tells the CLI to stop expecting local files for them.
+
+```bash
 # Going forward — new schema change:
 supabase migration new my_change        # creates a new timestamped file
 #   ...edit the SQL...
