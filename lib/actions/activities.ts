@@ -42,7 +42,7 @@ export async function logActivity(leadId: string, input: LogActivityInput): Prom
     notes: input.notes?.trim() || null,
     outcome: input.outcome?.trim() || null,
     direction: input.type === "Task" || input.type === "Note" ? null : (input.direction ?? "out"),
-    due_date: input.type === "Task" ? (input.dueDate ?? null) : null,
+    due_date: input.type === "Task" || input.type === "Meeting" ? (input.dueDate ?? null) : null,
     done: false,
     activity_date: new Date().toISOString(),
   });

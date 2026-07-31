@@ -120,7 +120,8 @@ export function LineChart({
   const y = (v: number) => padding.top + innerH - (v / max) * innerH;
   const x = (i: number) => padding.left + i * stepX;
 
-  const gridValues = [0, 0.5, 1].map((f) => Math.round(max * f));
+  // dedupe: at small max values, e.g. max=1, 0.5 and 1 both round to the same tick
+  const gridValues = [...new Set([0, 0.5, 1].map((f) => Math.round(max * f)))];
 
   return (
     <figure className="w-full overflow-x-auto scroll-thin">
