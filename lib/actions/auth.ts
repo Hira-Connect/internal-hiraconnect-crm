@@ -70,7 +70,13 @@ export async function sendPasswordReset(_prev: AuthState, formData: FormData): P
     .limit(1);
 
   const profile = rows?.[0] as { id: string; is_active: boolean } | undefined;
-  if (!profile?.is_active) return { error: null, done: true };
+  if (!profile?.is_active) {
+    // Same reply as success, so the sign-in page cannot be used to find out who
+    // works here — but say so in the log, because "no account with that address"
+    // and "the mail failed" look identical from the outside.
+    console.warn(`[auth] reset requested for ${email}: no active CRM profile, nothing sent`);
+    return { error: null, done: true };
+  }
 
   // Checked before the cooldown on purpose. A deployment with no transport must
   // say so on every attempt — otherwise the first click reports the real problem
@@ -86,7 +92,13 @@ export async function sendPasswordReset(_prev: AuthState, formData: FormData): P
   }
 
   const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email });
-  if (error || !data) return { error: null, done: true };
+  if (error || !data) {
+    // Past this point the account is known to exist, so reporting the failure
+    // gives an attacker nothing new — and staying quiet here was hiding a real
+    // server fault behind a cheerful "it is on its way".
+    console.error(`[auth] could not mint a recovery link for ${email}: ${error?.message ?? "no data"}`);
+    return { error: `We could not create the reset link — ${error?.message ?? "unknown error"}` };
+  }
 
   const link = confirmUrl(await siteOrigin(), {
     tokenHash: data.properties.hashed_token,
