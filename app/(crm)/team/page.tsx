@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { TeamManager } from "@/components/team/team-manager";
 import { StatCard } from "@/components/ui/primitives";
 import { getAccountStates, getLeads, getProfiles, getTeams, requireProfile } from "@/lib/queries";
-import { isManagerUp } from "@/lib/permissions";
+import { isAdmin, isManagerUp } from "@/lib/permissions";
+import { mailConfig } from "@/lib/email/send";
+import { hasServiceKey } from "@/lib/supabase/admin";
 
 export const metadata: Metadata = { title: "Team" };
 
@@ -49,6 +51,11 @@ export default async function TeamPage() {
         leads={leads}
         me={me}
         accountStates={accountStates}
+        delivery={
+          isAdmin(me)
+            ? { ...mailConfig(), serviceKey: hasServiceKey(), siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? null }
+            : null
+        }
       />
     </div>
   );

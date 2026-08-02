@@ -229,6 +229,31 @@ export async function cancelInvite(memberId: string): Promise<ActionResult> {
   return ok();
 }
 
+/** Sends a real email through the configured transport to the admin's own
+ *  address, and reports whatever the mail server said back.
+ *
+ *  Deliberately not addressable: it always goes to the caller, so it cannot be
+ *  turned into a relay. It exists because a deployment's environment is where
+ *  mail delivery usually breaks, and the alternative is reading server logs.
+ */
+export async function sendTestEmail(): Promise<ActionResult<{ to: string; reason: string | null }>> {
+  const { profile, userId, email } = await currentActor();
+  if (!userId) return fail("Not signed in.");
+  if (!profile || profile.role !== "admin") return fail("Only admins can send a test email.");
+  if (!email) return fail("Your account has no email address.");
+
+  const link = `${await siteOrigin()}/login`;
+  const mail = passwordResetEmail({ link });
+  const result = await sendMail({
+    ...mail,
+    to: email,
+    subject: "HIRA Connect CRM — test email",
+  });
+
+  if (!result.sent) return fail(result.reason);
+  return ok({ to: email, reason: null });
+}
+
 /* ------------------------------------------------------------------ teams */
 
 export async function createTeam(formData: FormData): Promise<ActionResult> {

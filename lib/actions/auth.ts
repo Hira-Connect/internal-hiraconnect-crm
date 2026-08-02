@@ -7,7 +7,7 @@ import { createClient } from "../supabase/server";
 import { createAdminClient } from "../supabase/admin";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../supabase/env";
 import { confirmUrl, siteOrigin } from "../auth-links";
-import { sendMail } from "../email/send";
+import { MAIL_NOT_CONFIGURED, mailerConfigured, sendMail } from "../email/send";
 import { passwordResetEmail } from "../email/templates";
 
 export interface AuthState {
@@ -71,6 +71,13 @@ export async function sendPasswordReset(_prev: AuthState, formData: FormData): P
 
   const profile = rows?.[0] as { id: string; is_active: boolean } | undefined;
   if (!profile?.is_active) return { error: null, done: true };
+
+  // Checked before the cooldown on purpose. A deployment with no transport must
+  // say so on every attempt — otherwise the first click reports the real problem
+  // and every one after it replies "on its way" from a server that cannot send.
+  if (!mailerConfigured()) {
+    return { error: `We could not send the email — ${MAIL_NOT_CONFIGURED}` };
+  }
 
   const { data: found } = await admin.auth.admin.getUserById(profile.id);
   const lastSent = (found?.user as { recovery_sent_at?: string } | null)?.recovery_sent_at;

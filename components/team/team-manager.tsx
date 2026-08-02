@@ -7,17 +7,38 @@ import {
   createTeam,
   deleteTeam,
   resendInvite,
+  sendTestEmail,
   updateMember,
   updateTeam,
   type InviteOutcome,
 } from "@/lib/actions/team";
 import { recomputeAllScores, transferLeads } from "@/lib/actions/leads";
-import { Avatar, Badge, Button, EmptyState, Field, Input, Panel, Select } from "@/components/ui/primitives";
+import {
+  Avatar,
+  Badge,
+  Button,
+  EmptyState,
+  Field,
+  Input,
+  KeyValue,
+  Panel,
+  Select,
+} from "@/components/ui/primitives";
 import { actionErrorClass, useAction } from "@/components/ui/use-action";
 import { InviteForm, InviteResult } from "@/components/team/invite-form";
 import { ROLES, isAdmin } from "@/lib/permissions";
 import { displayName, relTime } from "@/lib/format";
 import type { AccountState, LeadRow, Profile, Role, Team } from "@/lib/types";
+
+/** What the server has configured for outgoing mail. Null for non-admins. */
+export interface DeliveryStatus {
+  transport: "resend" | "smtp" | "none";
+  detail: string;
+  from: string;
+  secretSet: boolean;
+  serviceKey: boolean;
+  siteUrl: string | null;
+}
 
 export function TeamManager({
   profiles,
@@ -25,12 +46,14 @@ export function TeamManager({
   leads,
   me,
   accountStates,
+  delivery,
 }: {
   profiles: Profile[];
   teams: Team[];
   leads: LeadRow[];
   me: Profile;
   accountStates: Record<string, AccountState>;
+  delivery: DeliveryStatus | null;
 }) {
   const router = useRouter();
   const { run, pending, error } = useAction();
@@ -243,6 +266,8 @@ export function TeamManager({
         </p>
       </Panel>
 
+      {delivery && <DeliveryPanel delivery={delivery} />}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <TeamsPanel teams={teams} profiles={profiles} admin={admin} />
 
@@ -275,6 +300,92 @@ export function TeamManager({
         )}
       </div>
     </div>
+  );
+}
+
+/** Reads back what THIS deployment has configured, and lets an admin prove it by
+ *  sending a real email to themselves. When invitations or resets do not arrive,
+ *  the cause is almost always visible here — a missing variable, or the mail
+ *  server's own rejection message. */
+function DeliveryPanel({ delivery }: { delivery: DeliveryStatus }) {
+  const { run, pending, error } = useAction();
+  const [sentTo, setSentTo] = useState<string | null>(null);
+
+  const problems: string[] = [];
+  if (!delivery.serviceKey) {
+    problems.push("SUPABASE_SERVICE_ROLE_KEY is missing — invitations and password resets are disabled.");
+  }
+  if (delivery.transport === "none") {
+    problems.push("No mail transport is set, so nothing can be emailed. Set SMTP_HOST, SMTP_USER and SMTP_PASS.");
+  }
+  if (delivery.transport === "smtp" && !delivery.secretSet) {
+    problems.push("SMTP_PASS is empty — the mail server will refuse the connection.");
+  }
+  if (!delivery.siteUrl) {
+    problems.push("NEXT_PUBLIC_SITE_URL is not set; links use whatever host the request arrived on.");
+  } else if (delivery.siteUrl.includes("localhost")) {
+    problems.push(`NEXT_PUBLIC_SITE_URL is ${delivery.siteUrl} — emailed links will point at localhost.`);
+  }
+
+  return (
+    <Panel
+      title="Email delivery"
+      subtitle="What this deployment is configured with. Every value here comes from its environment."
+    >
+      <div className="space-y-2 text-xs">
+        <KeyValue label="Transport">
+          {delivery.transport === "none" ? (
+            <Badge tone="danger">Not configured</Badge>
+          ) : (
+            <span className="font-mono">{delivery.detail}</span>
+          )}
+        </KeyValue>
+        <KeyValue label="From">
+          <span className="font-mono">{delivery.from}</span>
+        </KeyValue>
+        <KeyValue label="Links point to">
+          <span className="font-mono">{delivery.siteUrl ?? "the incoming request's host"}</span>
+        </KeyValue>
+        <KeyValue label="Service key">
+          {delivery.serviceKey ? <Badge tone="success">Present</Badge> : <Badge tone="danger">Missing</Badge>}
+        </KeyValue>
+
+        {problems.length > 0 && (
+          <ul className="space-y-1 rounded-md bg-amber-50 px-3 py-2 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+            {problems.map((p) => (
+              <li key={p}>• {p}</li>
+            ))}
+          </ul>
+        )}
+
+        {error && (
+          <div className="rounded-md bg-red-50 px-3 py-2 text-red-700 dark:bg-red-500/10 dark:text-red-300">
+            <p className="font-semibold">The mail server refused it:</p>
+            <p className="mt-1 font-mono break-words">{error}</p>
+          </div>
+        )}
+        {sentTo && !error && (
+          <p className="rounded-md bg-emerald-50 px-3 py-2 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
+            Accepted for delivery to <b>{sentTo}</b>. If it does not arrive, it was accepted and then
+            dropped — check spam, then the domain&apos;s SPF and DKIM records.
+          </p>
+        )}
+
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={pending}
+          onClick={() =>
+            run(
+              () => sendTestEmail(),
+              (data) => setSentTo(data?.to ?? null),
+            )
+          }
+        >
+          {pending ? "Sending…" : "Send a test email to myself"}
+        </Button>
+      </div>
+    </Panel>
   );
 }
 
