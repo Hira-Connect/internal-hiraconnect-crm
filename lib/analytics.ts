@@ -2,7 +2,7 @@
  *  works on the server (page render) and in the browser (filter changes). */
 
 import { FUNNEL_PATH, categoryOf, findStage } from "./stages";
-import type { ActivityRow, LeadRow, Profile, Stage, StageHistory } from "./types";
+import type { ActivityRow, Grade, LeadRow, Profile, ScoreHistory, Stage, StageHistory } from "./types";
 
 /* ------------------------------------------------------------------ funnel */
 
@@ -319,4 +319,46 @@ export function hotLeads(leads: LeadRow[], stages: Stage[], limit = 8): LeadRow[
     .filter((l) => l.grade === "A" || l.grade === "B")
     .sort((a, b) => b.score_total - a.score_total)
     .slice(0, limit);
+}
+
+/* ------------------------------------------------------------ quality movement */
+
+export interface ScoreMovement {
+  leadId: string;
+  from: number;
+  to: number;
+  delta: number;
+  fromGrade: Grade | null;
+  toGrade: Grade | null;
+}
+
+/** Whether each lead's score rose, fell or held steady within the window, comparing
+ *  the earliest and latest `lead_score_history` rows recorded for it in that span.
+ *  Leads with only one rescoring in the window carry no trend yet and are omitted. */
+export function scoreMovement(history: ScoreHistory[], windowDays = 14, now: Date = new Date()): ScoreMovement[] {
+  const since = new Date(now.getTime() - windowDays * 86_400_000);
+  const byLead = new Map<string, ScoreHistory[]>();
+  for (const h of history) {
+    if (new Date(h.created_at) < since) continue;
+    const list = byLead.get(h.lead_id) ?? [];
+    list.push(h);
+    byLead.set(h.lead_id, list);
+  }
+
+  const moves: ScoreMovement[] = [];
+  for (const [leadId, rows] of byLead) {
+    if (rows.length < 2) continue;
+    const sorted = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const first = sorted[0];
+    const last = sorted[sorted.length - 1];
+    moves.push({
+      leadId,
+      from: first.score_total,
+      to: last.score_total,
+      delta: last.score_total - first.score_total,
+      fromGrade: first.grade,
+      toGrade: last.grade,
+    });
+  }
+  return moves;
 }

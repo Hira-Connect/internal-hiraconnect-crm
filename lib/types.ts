@@ -165,6 +165,11 @@ export interface ActivityRow extends Activity {
   author_profile: ProfileBrief | null;
 }
 
+/** A meeting activity joined with its lead — used for the "today's meetings" panel. */
+export interface MeetingRow extends ActivityRow {
+  lead: Pick<Lead, "id" | "name"> | null;
+}
+
 export interface StageHistory {
   id: string;
   lead_id: string;

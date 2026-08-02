@@ -11,6 +11,7 @@ import type {
   Company,
   Contact,
   LeadRow,
+  MeetingRow,
   MonthlyTarget,
   Notification,
   Profile,
@@ -197,6 +198,21 @@ export const getMyTasks = cache(async (userId: string): Promise<ActivityRow[]> =
   return (data ?? []) as unknown as ActivityRow[];
 });
 
+/** Meetings I have scheduled (due_date) for today that haven't been marked done yet. */
+export const getTodaysMeetings = cache(async (userId: string): Promise<MeetingRow[]> => {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await supabase
+    .from("activities")
+    .select(`${ACTIVITY_SELECT}, lead:leads(id,name)`)
+    .eq("type", "Meeting")
+    .eq("done", false)
+    .eq("owner_id", userId)
+    .eq("due_date", today)
+    .order("created_at", { ascending: true });
+  return (data ?? []) as unknown as MeetingRow[];
+});
+
 /* ------------------------------------------------------------- accounts */
 
 export const getCompanies = cache(async (): Promise<Company[]> => {
@@ -268,4 +284,17 @@ export const getRecentActivities = cache(async (days = 120): Promise<ActivityRow
     .order("created_at", { ascending: false })
     .limit(5000);
   return (data ?? []) as unknown as ActivityRow[];
+});
+
+/** Rescoring history across every visible lead — the basis for the quality-movement panel. */
+export const getRecentScoreHistory = cache(async (days = 14): Promise<ScoreHistory[]> => {
+  const supabase = await createClient();
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const { data } = await supabase
+    .from("lead_score_history")
+    .select("*")
+    .gte("created_at", since)
+    .order("created_at", { ascending: true })
+    .limit(5000);
+  return (data ?? []) as ScoreHistory[];
 });
