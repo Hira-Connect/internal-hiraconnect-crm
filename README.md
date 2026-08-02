@@ -168,7 +168,7 @@ Three server-side variables make it work — see [`.env.example`](.env.example):
 
 | Variable | Why |
 |---|---|
-| `SUPABASE_SERVICE_ROLE_KEY` | mints accounts and one-time tokens. **Never** prefix it `NEXT_PUBLIC_`. |
+| `SUPABASE_SERVICE_ROLE_KEY` | mints accounts and one-time tokens. **Never** prefix it `NEXT_PUBLIC_`. The anon key and the service\_role key are two similar-looking JWTs on the same dashboard page — [`lib/service-key.ts`](lib/service-key.ts) reads the key's own `role` claim and refuses a wrong one by name, rather than letting Supabase answer a cryptic 403. |
 | `NEXT_PUBLIC_SITE_URL` | where emailed links point, so a preview deploy cannot email a link into the preview |
 | `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` (+ optional `EMAIL_FROM`) | the transport |
 
@@ -356,7 +356,8 @@ new account lands as a `rep` with no route to promote itself.
 | *535 Authentication failed* from Hostinger | `SMTP_USER` must be the full mailbox address and `SMTP_PASS` that mailbox's own password — not the hPanel login. |
 | *Sender address rejected* | `EMAIL_FROM` is not the mailbox you authenticated as. Clear it and the app uses `SMTP_USER`. |
 | *That link has already been used or has expired* | Links are single-use and short-lived; a corporate email scanner that pre-opens links will burn one. Ask for a new one. |
-| *Password reset is not set up on this server yet* | `SUPABASE_SERVICE_ROLE_KEY` is missing from the deployment. |
+| *Password reset is not set up on this server yet* | `SUPABASE_SERVICE_ROLE_KEY` is missing or is the wrong key. **Team → Email delivery** names which. |
+| *User not allowed* (from an older build) | Supabase's 403 for an admin call made with the anon key: `SUPABASE_SERVICE_ROLE_KEY` held the anon key. The app now refuses that key up front and says so instead. |
 | Signs in, then every screen shows "could not load" | Migrations not applied. Run `supabase db push`. |
 | Signs in, but sees almost nothing | Profile role is `rep`. Promote from **Team**, or re-run `setup:user` with `--role admin`. |
 | Build fails on Vercel with a missing-env error | `NEXT_PUBLIC_SUPABASE_*` not set for that environment. The app fails fast by design. |

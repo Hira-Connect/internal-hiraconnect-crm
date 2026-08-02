@@ -30,13 +30,16 @@ import { ROLES, isAdmin } from "@/lib/permissions";
 import { displayName, relTime } from "@/lib/format";
 import type { AccountState, LeadRow, Profile, Role, Team } from "@/lib/types";
 
-/** What the server has configured for outgoing mail. Null for non-admins. */
+/** What the server has configured for outgoing mail and admin access. Null for
+ *  non-admins. `serviceKey` is the key's *validity*, not its presence — a
+ *  present-but-wrong key is the failure this panel exists to name. */
 export interface DeliveryStatus {
   transport: "resend" | "smtp" | "none";
   detail: string;
   from: string;
   secretSet: boolean;
-  serviceKey: boolean;
+  serviceKey: "ok" | "missing" | "invalid";
+  serviceKeyProblem: string | null;
   siteUrl: string | null;
 }
 
@@ -312,9 +315,7 @@ function DeliveryPanel({ delivery }: { delivery: DeliveryStatus }) {
   const [sentTo, setSentTo] = useState<string | null>(null);
 
   const problems: string[] = [];
-  if (!delivery.serviceKey) {
-    problems.push("SUPABASE_SERVICE_ROLE_KEY is missing — invitations and password resets are disabled.");
-  }
+  if (delivery.serviceKeyProblem) problems.push(delivery.serviceKeyProblem);
   if (delivery.transport === "none") {
     problems.push("No mail transport is set, so nothing can be emailed. Set SMTP_HOST, SMTP_USER and SMTP_PASS.");
   }
@@ -347,7 +348,13 @@ function DeliveryPanel({ delivery }: { delivery: DeliveryStatus }) {
           <span className="font-mono">{delivery.siteUrl ?? "the incoming request's host"}</span>
         </KeyValue>
         <KeyValue label="Service key">
-          {delivery.serviceKey ? <Badge tone="success">Present</Badge> : <Badge tone="danger">Missing</Badge>}
+          {delivery.serviceKey === "ok" ? (
+            <Badge tone="success">Valid</Badge>
+          ) : delivery.serviceKey === "missing" ? (
+            <Badge tone="danger">Missing</Badge>
+          ) : (
+            <Badge tone="danger">Wrong key</Badge>
+          )}
         </KeyValue>
 
         {problems.length > 0 && (

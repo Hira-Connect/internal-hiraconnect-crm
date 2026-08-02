@@ -5,7 +5,7 @@ import { StatCard } from "@/components/ui/primitives";
 import { getAccountStates, getLeads, getProfiles, getTeams, requireProfile } from "@/lib/queries";
 import { isAdmin, isManagerUp } from "@/lib/permissions";
 import { mailConfig } from "@/lib/email/send";
-import { hasServiceKey } from "@/lib/supabase/admin";
+import { serviceKeyError, serviceKeyStatus } from "@/lib/supabase/admin";
 
 export const metadata: Metadata = { title: "Team" };
 
@@ -53,7 +53,12 @@ export default async function TeamPage() {
         accountStates={accountStates}
         delivery={
           isAdmin(me)
-            ? { ...mailConfig(), serviceKey: hasServiceKey(), siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? null }
+            ? {
+                ...mailConfig(),
+                serviceKey: serviceKeyStatus().status,
+                serviceKeyProblem: serviceKeyError(),
+                siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? null,
+              }
             : null
         }
       />

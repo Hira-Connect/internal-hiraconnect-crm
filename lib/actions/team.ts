@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { currentActor, emptyToNull, fail, ok, type ActionResult } from "./shared";
-import { SERVICE_KEY_MISSING, createAdminClient } from "../supabase/admin";
+import { createAdminClient, describeAdminError, serviceKeyError } from "../supabase/admin";
 import { confirmUrl, siteOrigin } from "../auth-links";
 import { sendMail } from "../email/send";
 import { inviteEmail, passwordResetEmail } from "../email/templates";
@@ -114,7 +114,7 @@ export async function inviteMember(formData: FormData): Promise<ActionResult<Inv
   const teamId = emptyToNull(formData.get("team_id"));
 
   const admin = createAdminClient();
-  if (!admin) return fail(SERVICE_KEY_MISSING);
+  if (!admin) return fail(serviceKeyError() ?? "Admin access is not configured.");
 
   const { data: already } = await supabase
     .from("profiles")
@@ -128,7 +128,7 @@ export async function inviteMember(formData: FormData): Promise<ActionResult<Inv
     email,
     options: fullName ? { data: { full_name: fullName } } : undefined,
   });
-  if (error || !data?.user) return fail(error?.message ?? "Could not create the invitation.");
+  if (error || !data?.user) return fail(describeAdminError(error));
 
   // handle_new_user has already inserted the profile as a rep. Role, team and
   // name are written with the admin's OWN client on purpose: the
@@ -167,15 +167,16 @@ export async function resendInvite(memberId: string): Promise<ActionResult<Invit
   if (!profile || profile.role !== "admin") return fail("Only admins can resend invitations.");
 
   const admin = createAdminClient();
-  if (!admin) return fail(SERVICE_KEY_MISSING);
+  if (!admin) return fail(serviceKeyError() ?? "Admin access is not configured.");
 
   const { data: found, error: lookupError } = await admin.auth.admin.getUserById(memberId);
   const account = found?.user;
-  if (lookupError || !account?.email) return fail("That account no longer exists in Supabase Auth.");
+  if (lookupError) return fail(describeAdminError(lookupError));
+  if (!account?.email) return fail("That account no longer exists in Supabase Auth.");
 
   const type = account.email_confirmed_at ? "recovery" : "invite";
   const { data, error } = await admin.auth.admin.generateLink({ type, email: account.email });
-  if (error || !data) return fail(error?.message ?? "Could not create the link.");
+  if (error || !data) return fail(describeAdminError(error));
 
   const link = confirmUrl(await siteOrigin(), {
     tokenHash: data.properties.hashed_token,
@@ -214,7 +215,7 @@ export async function cancelInvite(memberId: string): Promise<ActionResult> {
   if (memberId === userId) return fail("You cannot remove your own account.");
 
   const admin = createAdminClient();
-  if (!admin) return fail(SERVICE_KEY_MISSING);
+  if (!admin) return fail(serviceKeyError() ?? "Admin access is not configured.");
 
   const { data: found } = await admin.auth.admin.getUserById(memberId);
   if (!found?.user) return fail("That account no longer exists in Supabase Auth.");
@@ -223,7 +224,7 @@ export async function cancelInvite(memberId: string): Promise<ActionResult> {
   }
 
   const { error } = await admin.auth.admin.deleteUser(memberId);
-  if (error) return fail(error.message);
+  if (error) return fail(describeAdminError(error));
 
   revalidatePath("/team");
   return ok();

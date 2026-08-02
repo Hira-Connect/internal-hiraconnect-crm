@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient as createPlainClient } from "@supabase/supabase-js";
 import { createClient } from "../supabase/server";
-import { createAdminClient } from "../supabase/admin";
+import { createAdminClient, describeAdminError, serviceKeyError } from "../supabase/admin";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../supabase/env";
 import { confirmUrl, siteOrigin } from "../auth-links";
 import { MAIL_NOT_CONFIGURED, mailerConfigured, sendMail } from "../email/send";
@@ -59,6 +59,8 @@ export async function sendPasswordReset(_prev: AuthState, formData: FormData): P
 
   const admin = createAdminClient();
   if (!admin) {
+    // The detail belongs in the log, not on a public sign-in page.
+    console.error(`[auth] reset unavailable: ${serviceKeyError()}`);
     return { error: "Password reset is not set up on this server yet — ask an admin to finish the setup." };
   }
 
@@ -96,8 +98,9 @@ export async function sendPasswordReset(_prev: AuthState, formData: FormData): P
     // Past this point the account is known to exist, so reporting the failure
     // gives an attacker nothing new — and staying quiet here was hiding a real
     // server fault behind a cheerful "it is on its way".
-    console.error(`[auth] could not mint a recovery link for ${email}: ${error?.message ?? "no data"}`);
-    return { error: `We could not create the reset link — ${error?.message ?? "unknown error"}` };
+    const reason = describeAdminError(error);
+    console.error(`[auth] could not mint a recovery link for ${email}: ${reason}`);
+    return { error: `We could not create the reset link — ${reason}` };
   }
 
   const link = confirmUrl(await siteOrigin(), {
