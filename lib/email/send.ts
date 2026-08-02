@@ -31,6 +31,38 @@ export function mailerConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY || process.env.SMTP_HOST);
 }
 
+/** What the server thinks it is configured with — no secrets, safe to render.
+ *  Exists because the deployment's environment is the usual reason mail does not
+ *  arrive, and reading it from inside the app beats guessing at a dashboard. */
+export interface MailConfig {
+  transport: "resend" | "smtp" | "none";
+  detail: string;
+  from: string;
+  /** SMTP without a password almost always means a half-filled environment. */
+  secretSet: boolean;
+}
+
+export function mailConfig(): MailConfig {
+  if (process.env.RESEND_API_KEY) {
+    return {
+      transport: "resend",
+      detail: "Resend API",
+      from: mailFrom(),
+      secretSet: true,
+    };
+  }
+  if (process.env.SMTP_HOST) {
+    const user = process.env.SMTP_USER || "(no username — sending unauthenticated)";
+    return {
+      transport: "smtp",
+      detail: `${process.env.SMTP_HOST}:${process.env.SMTP_PORT ?? 465} as ${user}`,
+      from: mailFrom(),
+      secretSet: Boolean(process.env.SMTP_PASS),
+    };
+  }
+  return { transport: "none", detail: "nothing configured", from: mailFrom(), secretSet: false };
+}
+
 /** `Name <address>` used as the From header.
  *
  *  Falls back to the SMTP mailbox itself, because Hostinger (like most hosts)
@@ -48,8 +80,42 @@ export async function sendMail(mail: Mail): Promise<MailResult> {
     if (process.env.SMTP_HOST) return await sendWithSmtp(mail);
     return { sent: false, reason: MAIL_NOT_CONFIGURED };
   } catch (e) {
-    return { sent: false, reason: e instanceof Error ? e.message : String(e) };
+    const reason = describeMailError(e);
+    // Always logged, not just in development: when mail fails on a deployment
+    // the server log is the only place anyone can see why.
+    console.error(`[email] send to ${mail.to} failed: ${reason}`);
+    return { sent: false, reason };
   }
+}
+
+/** nodemailer hides the useful part in `code` and the server's own `response`.
+ *  Surfacing both turns "it didn't work" into something actionable. */
+function describeMailError(e: unknown): string {
+  if (!(e instanceof Error)) return String(e);
+
+  const err = e as Error & { code?: string; response?: string; command?: string };
+  const parts = [err.message];
+  if (err.response && !err.message.includes(err.response)) parts.push(err.response);
+
+  switch (err.code) {
+    case "EAUTH":
+      parts.push("SMTP_USER must be the full mailbox address and SMTP_PASS that mailbox's own password.");
+      break;
+    case "ECONNECTION":
+    case "ESOCKET":
+      parts.push("Could not open the connection — check SMTP_HOST and SMTP_PORT (465 for SSL, 587 for TLS).");
+      break;
+    case "ETIMEDOUT":
+    case "ECONNRESET":
+      parts.push("The mail server did not answer in time.");
+      break;
+    case "EENVELOPE":
+      parts.push("The server refused the From or To address — EMAIL_FROM must be the mailbox you signed in as.");
+      break;
+    default:
+      if (err.code) parts.push(`(${err.code})`);
+  }
+  return parts.join(" ");
 }
 
 async function sendWithResend(mail: Mail): Promise<MailResult> {
