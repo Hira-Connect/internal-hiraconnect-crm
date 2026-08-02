@@ -2,29 +2,41 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createTeam, deleteTeam, updateMember, updateTeam } from "@/lib/actions/team";
+import {
+  cancelInvite,
+  createTeam,
+  deleteTeam,
+  resendInvite,
+  updateMember,
+  updateTeam,
+  type InviteOutcome,
+} from "@/lib/actions/team";
 import { recomputeAllScores, transferLeads } from "@/lib/actions/leads";
 import { Avatar, Badge, Button, EmptyState, Field, Input, Panel, Select } from "@/components/ui/primitives";
 import { actionErrorClass, useAction } from "@/components/ui/use-action";
+import { InviteForm, InviteResult } from "@/components/team/invite-form";
 import { ROLES, isAdmin } from "@/lib/permissions";
-import { displayName } from "@/lib/format";
-import type { LeadRow, Profile, Role, Team } from "@/lib/types";
+import { displayName, relTime } from "@/lib/format";
+import type { AccountState, LeadRow, Profile, Role, Team } from "@/lib/types";
 
 export function TeamManager({
   profiles,
   teams,
   leads,
   me,
+  accountStates,
 }: {
   profiles: Profile[];
   teams: Team[];
   leads: LeadRow[];
   me: Profile;
+  accountStates: Record<string, AccountState>;
 }) {
   const router = useRouter();
   const { run, pending, error } = useAction();
   const admin = isAdmin(me);
   const [message, setMessage] = useState<string | null>(null);
+  const [resent, setResent] = useState<InviteOutcome | null>(null);
 
   const openCountFor = (id: string) =>
     leads.filter((l) => l.owner_id === id && !["Won", "Lost"].includes(l.status)).length;
@@ -43,6 +55,9 @@ export function TeamManager({
         </p>
       )}
       {error && <p className={actionErrorClass()}>{error}</p>}
+      {resent && <InviteResult outcome={resent} />}
+
+      {admin && <InviteForm teams={teams} />}
 
       <Panel
         title="People"
@@ -128,11 +143,7 @@ export function TeamManager({
                   </td>
                   <td className="px-3 py-2 tabular-nums">{openCountFor(person.id)}</td>
                   <td className="px-3 py-2">
-                    {person.is_active ? (
-                      <Badge tone="success">Active</Badge>
-                    ) : (
-                      <Badge tone="neutral">Deactivated</Badge>
-                    )}
+                    <StatusCell person={person} state={accountStates[person.id]} />
                   </td>
                   <td className="px-3 py-2 text-right">
                     {admin && (
@@ -146,6 +157,64 @@ export function TeamManager({
                             router.refresh();
                           }}
                         />
+                        {accountStates[person.id]?.confirmed === false ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() =>
+                                run(
+                                  () => resendInvite(person.id),
+                                  (data) => {
+                                    setResent(data ?? null);
+                                    setMessage(null);
+                                  },
+                                )
+                              }
+                              className="text-[11px] text-brand-500 hover:underline"
+                            >
+                              Resend invite
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => {
+                                if (!confirm(`Delete the pending account for ${person.email}?`)) return;
+                                run(
+                                  () => cancelInvite(person.id),
+                                  () => {
+                                    setResent(null);
+                                    setMessage("Invitation cancelled.");
+                                    router.refresh();
+                                  },
+                                );
+                              }}
+                              className="text-[11px] text-red-600 hover:underline dark:text-red-400"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          person.is_active && (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() =>
+                                run(
+                                  () => resendInvite(person.id),
+                                  (data) => {
+                                    setResent(data ?? null);
+                                    setMessage(null);
+                                  },
+                                )
+                              }
+                              className="text-[11px] text-muted hover:underline"
+                              title="Emails them a one-time link to set a new password"
+                            >
+                              Send reset link
+                            </button>
+                          )
+                        )}
                         <button
                           type="button"
                           disabled={pending}
@@ -168,8 +237,9 @@ export function TeamManager({
           </table>
         </div>
         <p className="border-t border-app px-3 py-2 text-[11px] text-muted">
-          New accounts are created in Supabase Auth (Dashboard → Authentication → Users). They appear here as a
-          rep the moment they first sign in; deactivating keeps all their history intact.
+          Invited people appear straight away and stay <b>Invited</b> until they open their link and choose a
+          password. Deactivating keeps all their history intact; cancelling is only possible before they
+          accept.
         </p>
       </Panel>
 
@@ -204,6 +274,30 @@ export function TeamManager({
           </Panel>
         )}
       </div>
+    </div>
+  );
+}
+
+/** `state` is undefined for non-admins and for a deployment without the service
+ *  key — then we show only what `profiles` knows, exactly as before. */
+function StatusCell({ person, state }: { person: Profile; state: AccountState | undefined }) {
+  if (!person.is_active) return <Badge tone="neutral">Deactivated</Badge>;
+
+  if (state && !state.confirmed) {
+    return (
+      <div className="space-y-0.5">
+        <Badge tone="warning">Invited</Badge>
+        <p className="text-[11px] text-muted">
+          {state.invitedAt ? `sent ${relTime(state.invitedAt)}` : "not signed in yet"}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0.5">
+      <Badge tone="success">Active</Badge>
+      {state?.lastSignInAt && <p className="text-[11px] text-muted">seen {relTime(state.lastSignInAt)}</p>}
     </div>
   );
 }

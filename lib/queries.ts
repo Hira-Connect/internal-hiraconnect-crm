@@ -3,8 +3,10 @@ import "server-only";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { createClient } from "./supabase/server";
+import { createAdminClient } from "./supabase/admin";
 import { DEFAULT_STAGES } from "./stages";
 import type {
+  AccountState,
   ActivityRow,
   Company,
   Contact,
@@ -74,6 +76,30 @@ export const getProfiles = cache(async (): Promise<Profile[]> => {
   const supabase = await createClient();
   const { data } = await supabase.from("profiles").select("*").order("full_name");
   return (data ?? []) as Profile[];
+});
+
+/** Invite/sign-in state per user id, read from Supabase Auth with the service
+ *  key. Admins only — everyone else (and a deployment without the key) gets an
+ *  empty map, and the Team screen simply omits the column. */
+export const getAccountStates = cache(async (): Promise<Record<string, AccountState>> => {
+  const me = await requireProfile();
+  if (me.role !== "admin" || !me.is_active) return {};
+
+  const admin = createAdminClient();
+  if (!admin) return {};
+
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error || !data) return {};
+
+  const states: Record<string, AccountState> = {};
+  for (const user of data.users) {
+    states[user.id] = {
+      confirmed: Boolean(user.email_confirmed_at ?? user.confirmed_at),
+      invitedAt: (user as { invited_at?: string }).invited_at ?? null,
+      lastSignInAt: user.last_sign_in_at ?? null,
+    };
+  }
+  return states;
 });
 
 export const getTeams = cache(async (): Promise<Team[]> => {
