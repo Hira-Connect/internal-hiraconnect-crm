@@ -287,6 +287,11 @@ The build **fails fast** if either `NEXT_PUBLIC_SUPABASE_*` is missing, rather t
 Invitations and password resets are disabled without `SUPABASE_SERVICE_ROLE_KEY`, and fall back to a
 copyable link without a mail transport.
 
+Every `NEXT_PUBLIC_*` value is **inlined at build time**, so adding or changing one only takes effect on the
+next deployment — redeploy after editing them, do not just restart. `NEXT_PUBLIC_SITE_URL` in particular
+must be the production domain: left on `http://localhost:3000` it emails people a link to their own laptop,
+which is the bug that made password reset look broken in the first place.
+
 **3. Set the auth URLs** in Supabase → Authentication → URL Configuration. The invitation and reset emails
 this app sends do not depend on them — they point straight at `/auth/confirm` — but Site URL is still the
 destination for anything triggered from the Supabase dashboard, and it must not be left on localhost:
@@ -303,6 +308,19 @@ destination for anything triggered from the Supabase dashboard, and it must not 
 3. Open a lead — timeline, score breakdown and stage control all render.
 4. Move a lead to **Lost** — it should refuse without a reason.
 5. **Targets → Refresh actuals** — numbers populate from real data.
+
+Then the account flows, which are the ones that depend on the mail transport:
+
+6. **Team → Invite a teammate**, using an address you can open. A green *Sent to …* line means SMTP works.
+   An amber line means it does not — the message names the cause, and the account still exists with a
+   copyable link.
+7. Open the invitation on a **different device** from the one that sent it. It must land on *Welcome —
+   choose a password*, not on the sign-in page. Set a password; you arrive signed in.
+8. Sign out, then **Forgot your password?** on that same address. Same link, same result.
+9. **Settings → Password** — a wrong current password must be refused, and changing it must not sign you
+   out of the tab you are in.
+10. Check the *From* address on both emails, and whether they landed in spam. If they did, add SPF/DKIM for
+    the domain in Hostinger's DNS.
 
 **Rolling back.** The database rollback is `supabase/rollback/v2_rls_down.sql` (policies only, never data).
 The app rollback is the previous Vercel deployment, or `legacy/index.html` served statically — it still
