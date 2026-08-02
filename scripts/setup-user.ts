@@ -104,7 +104,20 @@ async function main() {
       die(`Account is ready but the profile could not be set: ${profileError.message}`);
     }
   } else {
-    console.log(`✓ Profile set to ${role}`);
+    // The crm_guard_profile_update trigger reverts role/team/is_active for a
+    // caller it cannot see as an admin profile, and reports no error while doing
+    // it. Read the row back rather than trusting the write.
+    const { data: check } = await admin.from("profiles").select("role").eq("id", userId).maybeSingle();
+    if (check && check.role !== role) {
+      console.log(
+        `\n! The profile is still '${check.role}', not '${role}'.\n` +
+          "  The privilege guard silently reverted it. Apply the pending migrations\n" +
+          "  (`npm run db:push`) — 20260802120000_profile_guard_service_role.sql lets the\n" +
+          "  service-role key through — then re-run this command.",
+      );
+    } else {
+      console.log(`✓ Profile set to ${role}`);
+    }
   }
 
   // 3. attach to a team if one exists and the profile has none

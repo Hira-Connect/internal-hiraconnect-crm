@@ -35,6 +35,14 @@ export interface Profile {
   updated_at: string;
 }
 
+/** Sign-in state that lives in auth.users, not in `profiles` — used on the Team
+ *  screen to tell "invited, never arrived" apart from "active". */
+export interface AccountState {
+  confirmed: boolean;
+  invitedAt: string | null;
+  lastSignInAt: string | null;
+}
+
 export interface Team {
   id: string;
   name: string;

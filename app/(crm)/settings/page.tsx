@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { KeyValue, Panel } from "@/components/ui/primitives";
+import { ChangePasswordForm } from "@/components/team/change-password-form";
 import { ProfileForm } from "@/components/team/profile-form";
 import { getStages, getTeams, requireProfile } from "@/lib/queries";
 import { FUNNEL_MEANING } from "@/lib/stages";
@@ -38,11 +38,12 @@ export default async function SettingsPage() {
                 ? "You can see every lead owned by your team, plus anything unassigned."
                 : "You can see the leads you own. Ask an admin if something is missing."}
           </p>
-          <div className="mt-3 border-t border-app pt-3">
-            <Link href="/auth/update-password" className="text-xs text-brand-500 hover:underline">
-              Change my password →
-            </Link>
-          </div>
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Panel title="Password" subtitle="Changing it here does not sign you out of this device.">
+          <ChangePasswordForm />
         </Panel>
       </div>
 

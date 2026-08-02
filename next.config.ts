@@ -14,6 +14,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
 
+  /** nodemailer is only reached through a dynamic import in lib/email/send.ts;
+   *  leaving it external keeps the bundler from tracing its optional deps. */
+  serverExternalPackages: ["nodemailer"],
+
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },

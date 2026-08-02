@@ -31,9 +31,13 @@ export function LoginForm({ next }: { next: string }) {
         )}
         {resetState.done && (
           <p className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300">
-            If that address has an account, a reset link is on its way. Open it on this device.
+            If that address has an account, a reset link is on its way — it works on any device, and expires
+            within the hour. Check your spam folder if it does not arrive.
           </p>
         )}
+        <p className="text-xs text-muted">
+          Enter your work email and we will send you a one-time link to set a new password.
+        </p>
         <Field label="Email">
           <Input name="email" type="email" autoComplete="email" required placeholder="you@hiraconnect.com" />
         </Field>

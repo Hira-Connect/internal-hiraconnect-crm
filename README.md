@@ -26,6 +26,7 @@ npm run dev                    # http://localhost:3000
 | `npm run db:push` | Apply pending migrations to Supabase |
 | `npm run db:list` | Compare local and remote migration history |
 | `npm run setup:user` | Create a login (or reset its password) and set its role |
+| `npm run mail:test` | Send a real account email through the configured SMTP account |
 
 > **First deploy of v2 must apply the database migrations first.** See
 > [Database](#database) — the app expects tables (`profiles`, `stages`, `contacts`, …) that the v2
@@ -40,8 +41,9 @@ app/
   layout.tsx            root shell, fonts, theme bootstrap
   login/                email + password sign-in, password reset request
   auth/
-    callback/           exchanges Supabase email-link codes for a session
-    update-password/    completes a reset, or rotates your own password
+    confirm/            verifies an emailed invite/reset token, opens a session
+    callback/           legacy PKCE `?code=` exchange, kept for old links
+    update-password/    completes an invitation or a reset
   (crm)/
     layout.tsx          top nav, ⌘K palette, notifications, user menu
     page.tsx            dashboard — follow-up queue, hot leads, tasks, targets, trend
@@ -55,7 +57,9 @@ app/
     team/               roles, teams, lead transfer, bulk rescore
     settings/           own profile + scoring and SLA reference
 lib/
-  supabase/             browser / server / session clients
+  supabase/             browser / server / session clients, plus the admin one
+  email/                account emails — transport (Resend or SMTP) + templates
+  auth-links.ts         builds the one-time /auth/confirm links we email
   queries.ts            all server-side reads (React `cache`d per render)
   actions/              server actions — the only write path
   scoring.ts            fit + engagement scoring (pure, tested)
@@ -140,9 +144,65 @@ would fail are hidden, but the database is the authority. Child rows (activities
 history) inherit their lead's visibility. A trigger stops non-admins editing their own role, team or
 active flag.
 
-Accounts are created in **Supabase → Authentication → Users**. A profile row appears automatically on first
-sign-in with the `rep` role; promote from the Team screen. Deactivating a user preserves all their history,
-and their open leads can be transferred to someone else in one click.
+Admins add people from **Team → Invite a teammate**: give an email, name, role and team, and the CRM
+creates the login and emails a one-time link to choose a password. Until they open it they show as
+**Invited**, and the invitation can be resent or cancelled. Deactivating a user who has signed in preserves
+all their history, and their open leads can be transferred to someone else in one click.
+
+---
+
+## Account emails
+
+Invitations and password resets are sent **by this app**, not by Supabase. Supabase mints the account and
+the one-time token; the link in the email points at `/auth/confirm` on this domain, which verifies the
+token and opens a session.
+
+That is deliberate. The obvious alternative — Supabase's own mailer with `{{ .ConfirmationURL }}` — sends
+every click through GoTrue's redirect allow-list, and when the destination is not on that list GoTrue
+**silently falls back to the project's Site URL**. That is what broke password reset here: Site URL was
+`http://localhost:3000`, so every reset email in production pointed at the user's own laptop. Owning the
+link removes that failure mode, keeps the templates in this repo, and makes the link work on any device —
+a `token_hash` needs no cookie from the browser that asked for the reset, unlike the PKCE `?code=` flow.
+
+Three server-side variables make it work — see [`.env.example`](.env.example):
+
+| Variable | Why |
+|---|---|
+| `SUPABASE_SERVICE_ROLE_KEY` | mints accounts and one-time tokens. **Never** prefix it `NEXT_PUBLIC_`. |
+| `NEXT_PUBLIC_SITE_URL` | where emailed links point, so a preview deploy cannot email a link into the preview |
+| `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS` (+ optional `EMAIL_FROM`) | the transport |
+
+**Without a transport the features still work, they just do not send.** The account is created and the
+one-time link is shown in the UI for an admin to pass on by hand. `SUPABASE_SERVICE_ROLE_KEY` is the one
+hard requirement: without it, invitations and "Forgot your password?" are disabled outright.
+
+### Hostinger mail
+
+The mailbox comes from **hPanel → Emails → your mailbox → Configuration settings**:
+
+```
+SMTP_HOST=smtp.hostinger.com     # Titan-based plans use smtp.titan.email
+SMTP_PORT=465                    # SSL. Port 587 also works — the app picks STARTTLS for it
+SMTP_USER=crm@hiraconnect.com    # the FULL address, not just the part before the @
+SMTP_PASS=…                      # that mailbox's own password
+```
+
+Use a dedicated mailbox (`crm@`) rather than a personal one — its password ends up in the deployment's
+environment. `EMAIL_FROM` may be left unset, in which case `SMTP_USER` is used: Hostinger refuses to send
+as any address you did not authenticate as, so a mismatched From only produces bounces.
+
+Prove the credentials before anyone relies on them:
+
+```bash
+npm run mail:test -- --to you@hiraconnect.com              # the reset email
+npm run mail:test -- --to you@hiraconnect.com --template invite
+```
+
+`RESEND_API_KEY` is supported as an alternative and takes precedence if both are set.
+
+Anyone signed in can rotate their own password from **Settings → Password** (it asks for the current one
+first). An admin can email anybody a reset link from **Team → Send reset link**, which is the fastest way to
+rescue a locked-out teammate.
 
 ---
 
@@ -175,6 +235,9 @@ and idempotent. They run in this order, and the order matters:
 3. `20260729120200_v2_rls.sql` — replaces blanket authenticated access with role-scoped policies
 4. `20260729120300_v2_first_user_admin.sql` — the first account created while no admin exists becomes one,
    so a fresh project cannot lock its own owner out
+5. `20260802120000_profile_guard_service_role.sql` — lets the service-role key through the privilege guard.
+   Without it the guard reverts role/team/is\_active writes made with that key **and reports no error**, so
+   `setup:user --role admin` silently did nothing on an account that already had a profile row
 
 Step 2 must run before step 3 or the team locks itself out. If scoped access causes a problem, restore the
 previous behaviour with `supabase/rollback/v2_rls_down.sql` — it touches policies only, never data.
@@ -212,16 +275,26 @@ supabase db push
 
 **2. Set the environment variables** on the Vercel project, for Production *and* Preview:
 
-| Variable | Value |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://tcojgrxtpldiieytvthl.supabase.co` |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the project's anon key |
+| Variable | Value | Exposed to the browser |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://tcojgrxtpldiieytvthl.supabase.co` | yes — safe, RLS enforces access |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the project's anon key | yes — safe, RLS enforces access |
+| `NEXT_PUBLIC_SITE_URL` | `https://<production-domain>` | yes |
+| `SUPABASE_SERVICE_ROLE_KEY` | the project's service\_role key | **no — server only** |
+| `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` | the Hostinger mailbox — see [Account emails](#account-emails) | **no — server only** |
 
-Both are safe to expose — row access is enforced by RLS. The build **fails fast** if either is missing,
-rather than shipping a broken app.
+The build **fails fast** if either `NEXT_PUBLIC_SUPABASE_*` is missing, rather than shipping a broken app.
+Invitations and password resets are disabled without `SUPABASE_SERVICE_ROLE_KEY`, and fall back to a
+copyable link without a mail transport.
 
-**3. Allowlist the auth redirect URLs** in Supabase → Authentication → URL Configuration. Password-reset
-links are rejected if the origin is not listed:
+Every `NEXT_PUBLIC_*` value is **inlined at build time**, so adding or changing one only takes effect on the
+next deployment — redeploy after editing them, do not just restart. `NEXT_PUBLIC_SITE_URL` in particular
+must be the production domain: left on `http://localhost:3000` it emails people a link to their own laptop,
+which is the bug that made password reset look broken in the first place.
+
+**3. Set the auth URLs** in Supabase → Authentication → URL Configuration. The invitation and reset emails
+this app sends do not depend on them — they point straight at `/auth/confirm` — but Site URL is still the
+destination for anything triggered from the Supabase dashboard, and it must not be left on localhost:
 
 - Site URL: your production domain
 - Redirect URLs: `https://<production-domain>/auth/callback`, `https://*.vercel.app/auth/callback`
@@ -236,39 +309,54 @@ links are rejected if the origin is not listed:
 4. Move a lead to **Lost** — it should refuse without a reason.
 5. **Targets → Refresh actuals** — numbers populate from real data.
 
+Then the account flows, which are the ones that depend on the mail transport:
+
+6. **Team → Invite a teammate**, using an address you can open. A green *Sent to …* line means SMTP works.
+   An amber line means it does not — the message names the cause, and the account still exists with a
+   copyable link.
+7. Open the invitation on a **different device** from the one that sent it. It must land on *Welcome —
+   choose a password*, not on the sign-in page. Set a password; you arrive signed in.
+8. Sign out, then **Forgot your password?** on that same address. Same link, same result.
+9. **Settings → Password** — a wrong current password must be refused, and changing it must not sign you
+   out of the tab you are in.
+10. Check the *From* address on both emails, and whether they landed in spam. If they did, add SPF/DKIM for
+    the domain in Hostinger's DNS.
+
 **Rolling back.** The database rollback is `supabase/rollback/v2_rls_down.sql` (policies only, never data).
 The app rollback is the previous Vercel deployment, or `legacy/index.html` served statically — it still
 talks to the same project.
 
 ### Accounts
 
-The quickest path — creates the login, confirms the email, and sets the role in one step:
+Day to day, add people from **Team → Invite a teammate** — see [Account emails](#account-emails).
+
+`npm run setup:user` is the break-glass path: it works without a mail transport and can set a password
+directly, which is what you want for the very first admin or a locked-out one.
 
 ```bash
 # add SUPABASE_SERVICE_ROLE_KEY to .env.local first (see .env.example)
 npm run setup:user -- --email you@hiraconnect.com --password 'your-password' --name 'Your Name' --role admin
 ```
 
-Re-running it on an existing address **resets that account's password**, which is the fastest way to
-recover a locked-out user.
+Re-running it on an existing address **resets that account's password**. Setting `--role` on an account
+that already has a profile row needs migration 5 applied; the script now reads the row back and says so if
+the privilege guard reverted it.
 
-You can also create users in **Supabase → Authentication → Users**, with two caveats the script exists to
-avoid:
-
-- tick **Auto Confirm User**, or sign-in fails with *"Email not confirmed"*
-- an account created **after** the migrations gets the `rep` role, and a rep has no route to the Team
-  screen to promote themselves. `20260729120300_v2_first_user_admin.sql` covers the *first* such account;
-  after that, an existing admin must promote people from **Team**.
-
-Users can change their own password from the "Forgot your password?" link on sign-in, or
-**Settings → Change my password** once inside.
+Creating users in **Supabase → Authentication → Users** still works, with two caveats the invite flow and
+the script both avoid: tick **Auto Confirm User** or sign-in fails with *"Email not confirmed"*, and the
+new account lands as a `rep` with no route to promote itself.
 
 ### Login troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| *Invalid login credentials* | The account does not exist — run `npm run setup:user`. |
+| *Invalid login credentials* | The account does not exist — invite them from **Team**, or run `npm run setup:user`. |
 | *Email not confirmed* | Created via the dashboard without Auto Confirm. Re-run `setup:user` on the same address. |
+| Reset email never arrives | Run `npm run mail:test -- --to <you>`. If that works the transport is fine and the mail is in spam; if it does not, the error names the cause. An admin can hand over a link from **Team → Send reset link** in the meantime. |
+| *535 Authentication failed* from Hostinger | `SMTP_USER` must be the full mailbox address and `SMTP_PASS` that mailbox's own password — not the hPanel login. |
+| *Sender address rejected* | `EMAIL_FROM` is not the mailbox you authenticated as. Clear it and the app uses `SMTP_USER`. |
+| *That link has already been used or has expired* | Links are single-use and short-lived; a corporate email scanner that pre-opens links will burn one. Ask for a new one. |
+| *Password reset is not set up on this server yet* | `SUPABASE_SERVICE_ROLE_KEY` is missing from the deployment. |
 | Signs in, then every screen shows "could not load" | Migrations not applied. Run `supabase db push`. |
 | Signs in, but sees almost nothing | Profile role is `rep`. Promote from **Team**, or re-run `setup:user` with `--role admin`. |
 | Build fails on Vercel with a missing-env error | `NEXT_PUBLIC_SUPABASE_*` not set for that environment. The app fails fast by design. |
