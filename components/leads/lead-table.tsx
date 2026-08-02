@@ -34,6 +34,8 @@ export function LeadTable({
   lostReasons,
   initialOwner,
   initialQuery,
+  initialGrade,
+  initialStage,
 }: {
   leads: LeadRow[];
   stages: Stage[];
@@ -43,17 +45,19 @@ export function LeadTable({
   lostReasons: string[];
   initialOwner?: string;
   initialQuery?: string;
+  initialGrade?: string;
+  initialStage?: string;
 }) {
   const today = todayISO();
   const { run, pending, error } = useAction();
 
   const [query, setQuery] = useState(initialQuery ?? "");
   const [owner, setOwner] = useState(initialOwner ?? "");
-  const [stage, setStage] = useState("");
-  const [grade, setGrade] = useState("");
+  const [stage, setStage] = useState(initialStage ?? "");
+  const [grade, setGrade] = useState(initialGrade ?? "");
   // arriving from a company or an owner link means you want the whole book, not just open deals
   const [view, setView] = useState<"all" | "open" | "overdue" | "unassigned">(
-    initialQuery || initialOwner ? "all" : "open",
+    initialQuery || initialOwner || initialGrade || initialStage ? "all" : "open",
   );
   const [sort, setSort] = useState<SortKey>("score");
   const [selected, setSelected] = useState<Set<string>>(new Set());

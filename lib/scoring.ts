@@ -255,6 +255,15 @@ export function gradeLabel(grade: Grade): string {
   return GRADE_THRESHOLDS.find((t) => t.grade === grade)?.label ?? "";
 }
 
+/** Short hot/cold word per grade, for compact dashboard chips — kept next to the
+ *  thresholds (whose prose labels are too long for a badge) so they never drift. */
+export const GRADE_TEMPERATURE: Record<Grade, string> = {
+  A: "Hot",
+  B: "Warm",
+  C: "Cool",
+  D: "Cold",
+};
+
 /** Tailwind classes per grade — kept next to the thresholds so they never drift. */
 export const GRADE_STYLES: Record<Grade, string> = {
   A: "bg-emerald-100 text-emerald-800 ring-emerald-600/20 dark:bg-emerald-500/15 dark:text-emerald-300 dark:ring-emerald-400/30",

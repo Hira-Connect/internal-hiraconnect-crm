@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_STAGES, categoryOf, daysInStage, isOpen, nextStages, rotState, weightedValue } from "./stages";
-import { buildFunnel, salesCycleDays, sourceRoi, winRate } from "./analytics";
-import type { LeadRow, StageHistory } from "./types";
+import { buildFunnel, salesCycleDays, scoreMovement, sourceRoi, winRate } from "./analytics";
+import type { LeadRow, ScoreHistory, StageHistory } from "./types";
 
 const NOW = new Date("2026-07-29T10:00:00Z");
 
@@ -165,4 +165,37 @@ test("sales cycle averages creation-to-won", () => {
     lead({ created_at: "2026-06-01T00:00:00Z" }), // still open, must not count
   ]);
   assert.deepEqual(result, { avg: 15, samples: 2 });
+});
+
+function scoreHistoryRow(overrides: Partial<ScoreHistory> = {}): ScoreHistory {
+  return {
+    id: crypto.randomUUID(),
+    lead_id: "lead-1",
+    score_fit: 0,
+    score_engagement: 0,
+    score_total: 0,
+    grade: null,
+    reason: null,
+    created_at: "2026-07-20T00:00:00Z",
+    ...overrides,
+  };
+}
+
+test("scoreMovement compares the earliest and latest rescoring within the window", () => {
+  const rows: ScoreHistory[] = [
+    scoreHistoryRow({ lead_id: "up", score_total: 40, grade: "C", created_at: "2026-07-20T00:00:00Z" }),
+    scoreHistoryRow({ lead_id: "up", score_total: 60, grade: "B", created_at: "2026-07-27T00:00:00Z" }),
+    scoreHistoryRow({ lead_id: "down", score_total: 70, grade: "B", created_at: "2026-07-21T00:00:00Z" }),
+    scoreHistoryRow({ lead_id: "down", score_total: 50, grade: "C", created_at: "2026-07-28T00:00:00Z" }),
+    scoreHistoryRow({ lead_id: "once", score_total: 30, grade: "D", created_at: "2026-07-28T00:00:00Z" }),
+    scoreHistoryRow({ lead_id: "stale", score_total: 90, grade: "A", created_at: "2026-06-01T00:00:00Z" }),
+  ];
+
+  const moves = scoreMovement(rows, 14, NOW);
+  const byLead = (id: string) => moves.find((m) => m.leadId === id);
+
+  assert.equal(byLead("up")?.delta, 20, "rising score is reported as a positive delta");
+  assert.equal(byLead("down")?.delta, -20, "falling score is reported as a negative delta");
+  assert.equal(byLead("once"), undefined, "a single rescoring in the window has no trend yet");
+  assert.equal(byLead("stale"), undefined, "rescoring outside the window is excluded");
 });

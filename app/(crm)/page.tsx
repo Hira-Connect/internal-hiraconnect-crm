@@ -1,30 +1,43 @@
 import Link from "next/link";
 import { Badge, EmptyState, LinkButton, Meter, Panel, StatCard } from "@/components/ui/primitives";
-import { BarList, LineChart } from "@/components/charts";
+import { Donut, LineChart } from "@/components/charts";
 import { GradeBadge, RotBadge, StageBadge } from "@/components/leads/badges";
 import { TaskToggle } from "@/components/leads/task-toggle";
 import {
   getLeads,
   getMyTasks,
   getRecentActivities,
+  getRecentScoreHistory,
   getStages,
   getTargets,
+  getTodaysMeetings,
   requireProfile,
 } from "@/lib/queries";
-import { hotLeads, weeklyTrend } from "@/lib/analytics";
+import { hotLeads, scoreMovement, weeklyTrend } from "@/lib/analytics";
 import { categoryOf, daysInStage, rotState, weightedValue } from "@/lib/stages";
+import { GRADE_TEMPERATURE } from "@/lib/scoring";
 import { PACE_STYLES, isCurrencyMetric, paceOf } from "@/lib/metrics";
-import { formatCurrency, formatDate, monthISO, pct, relTime, todayISO } from "@/lib/format";
+import { cn, formatCurrency, formatDate, monthISO, pct, relTime, todayISO } from "@/lib/format";
+import type { Grade } from "@/lib/types";
+
+const TEMPERATURE_COLOR: Record<Grade, string> = { A: "#1e8e5a", B: "#2e6bd6", C: "#c9942a", D: "#94a3b8" };
+const TEMPERATURE_TONE: Record<Grade, "success" | "brand" | "warning" | "neutral"> = {
+  A: "success",
+  B: "brand",
+  C: "warning",
+  D: "neutral",
+};
 
 export default async function DashboardPage() {
-  const [me, leads, stages, targets, activities] = await Promise.all([
+  const [me, leads, stages, targets, activities, scoreHistory] = await Promise.all([
     requireProfile(),
     getLeads(),
     getStages(),
     getTargets(),
     getRecentActivities(90),
+    getRecentScoreHistory(14),
   ]);
-  const tasks = await getMyTasks(me.id);
+  const [tasks, meetings] = await Promise.all([getMyTasks(me.id), getTodaysMeetings(me.id)]);
 
   const today = todayISO();
   const thisMonth = monthISO();
@@ -41,13 +54,52 @@ export default async function DashboardPage() {
     (a.next_action_date ?? "").localeCompare(b.next_action_date ?? ""),
   );
 
-  const stageCounts = stages
-    .filter((s) => s.category === "open")
-    .map((s) => ({ label: s.label, value: open.filter((l) => l.status === s.key).length }))
-    .filter((s) => s.value > 0);
-
   const monthTargets = targets.filter((t) => t.month?.startsWith(thisMonth));
   const trend = weeklyTrend(leads, activities, 12);
+
+  const GRADES: Grade[] = ["A", "B", "C", "D"];
+  const temperature = GRADES.map((g) => ({
+    grade: g,
+    label: GRADE_TEMPERATURE[g],
+    count: open.filter((l) => l.grade === g).length,
+  }));
+  const unscored = open.filter((l) => !l.grade).length;
+
+  const movement = scoreMovement(scoreHistory, 14);
+  const improving = movement.filter((m) => m.delta > 0).length;
+  const declining = movement.filter((m) => m.delta < 0).length;
+  const steady = movement.length - improving - declining;
+  const worstMoves = movement
+    .filter((m) => m.delta < 0)
+    .sort((a, b) => a.delta - b.delta)
+    .slice(0, 5)
+    .map((m) => ({ ...m, lead: leads.find((l) => l.id === m.leadId) }))
+    .filter((m) => m.lead);
+
+  const pipelineHealth = stages
+    .filter((s) => s.category === "open")
+    .map((s) => {
+      const inStage = open.filter((l) => l.status === s.key);
+      let warningCount = 0;
+      let rottingCount = 0;
+      let totalDays = 0;
+      for (const l of inStage) {
+        const state = rotState(stages, l);
+        if (state === "warning") warningCount += 1;
+        else if (state === "rotting") rottingCount += 1;
+        totalDays += daysInStage(l);
+      }
+      return {
+        key: s.key,
+        label: s.label,
+        slaDays: s.sla_days,
+        count: inStage.length,
+        warning: warningCount,
+        rotting: rottingCount,
+        avgDays: inStage.length ? Math.round(totalDays / inStage.length) : 0,
+      };
+    })
+    .filter((r) => r.count > 0);
 
   return (
     <div className="space-y-4">
@@ -84,6 +136,34 @@ export default async function DashboardPage() {
           hint={`${wonThisMonth.length} won this month`}
         />
       </div>
+
+      {/* --------------------------------------------------- today's meetings */}
+      <Panel
+        title="Today's meetings"
+        subtitle="Scheduled for today — mark done once the call happens"
+        action={<Badge tone={meetings.length ? "brand" : "success"}>{meetings.length}</Badge>}
+      >
+        {meetings.length === 0 ? (
+          <EmptyState
+            title="Nothing scheduled today"
+            hint="Schedule one from a lead's activity composer — pick Meeting and set a date."
+          />
+        ) : (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {meetings.map((m) => (
+              <li key={m.id} className="flex items-start gap-2 rounded-lg border border-app p-2.5">
+                <div className="min-w-0 flex-1">
+                  <Link href={`/leads/${m.lead_id}`} className="block truncate text-sm font-medium hover:underline">
+                    {m.lead?.name ?? "Unknown lead"}
+                  </Link>
+                  <p className="truncate text-[11px] text-muted">{m.notes ?? "Meeting"}</p>
+                </div>
+                <TaskToggle activityId={m.id} done={m.done} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         {/* ------------------------------------------------- follow-up queue */}
@@ -169,6 +249,77 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
+        {/* -------------------------------------------------- lead temperature */}
+        <Panel title="Lead temperature" subtitle="Open pipeline, graded by fit + engagement">
+          <Donut
+            slices={temperature.map((t) => ({ label: t.label, value: t.count, color: TEMPERATURE_COLOR[t.grade] }))}
+            centerLabel={
+              <>
+                <div className="font-display text-xl font-bold">{open.length}</div>
+                <div className="text-[10px] text-muted">open</div>
+              </>
+            }
+          />
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {temperature.map((t) => (
+              <Link key={t.grade} href={`/leads?grade=${t.grade}`}>
+                <Badge tone={TEMPERATURE_TONE[t.grade]}>
+                  {t.label} {t.count}
+                </Badge>
+              </Link>
+            ))}
+            {unscored > 0 && <Badge tone="neutral">Unscored {unscored}</Badge>}
+          </div>
+        </Panel>
+
+        {/* --------------------------------------------------- quality movement */}
+        <Panel title="Quality movement" subtitle="Rescored leads over the last 14 days — is quality improving?">
+          {movement.length === 0 ? (
+            <EmptyState
+              title="Not enough data yet"
+              hint="Scores update automatically as activity gets logged against a lead."
+            />
+          ) : (
+            <>
+              <div className="mb-3 grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <div className="font-display text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {improving}
+                  </div>
+                  <div className="text-[11px] text-muted">Improving</div>
+                </div>
+                <div>
+                  <div className="font-display text-xl font-bold">{steady}</div>
+                  <div className="text-[11px] text-muted">Steady</div>
+                </div>
+                <div>
+                  <div className="font-display text-xl font-bold text-red-600 dark:text-red-400">{declining}</div>
+                  <div className="text-[11px] text-muted">Declining</div>
+                </div>
+              </div>
+              {worstMoves.length > 0 && (
+                <ul className="space-y-1.5">
+                  {worstMoves.map((m) => (
+                    <li
+                      key={m.leadId}
+                      className="flex items-center justify-between gap-2 border-t border-app pt-1.5 text-xs"
+                    >
+                      <Link href={`/leads/${m.leadId}`} className="min-w-0 flex-1 truncate hover:underline">
+                        {m.lead?.name}
+                      </Link>
+                      <span className="shrink-0 tabular-nums text-red-600 dark:text-red-400">
+                        {m.from} → {m.to}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </Panel>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
         {/* ------------------------------------------------------- my tasks */}
         <Panel title="My open tasks" subtitle="Tasks you logged that are still outstanding">
           {tasks.length === 0 ? (
@@ -201,9 +352,56 @@ export default async function DashboardPage() {
           )}
         </Panel>
 
-        {/* --------------------------------------------------- stage spread */}
-        <Panel title="Open pipeline by stage">
-          <BarList items={stageCounts} emptyText="Nothing open right now." />
+        {/* --------------------------------------------------- pipeline health */}
+        <Panel title="Pipeline health" subtitle="TAT/SLA by stage — avg days sitting vs. the stage's SLA">
+          {pipelineHealth.length === 0 ? (
+            <EmptyState title="Nothing open right now." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="text-left text-[11px] text-muted">
+                    <th className="pr-2 pb-1.5 font-medium">Stage</th>
+                    <th className="px-2 pb-1.5 text-right font-medium">Open</th>
+                    <th className="px-2 pb-1.5 text-right font-medium">Avg days</th>
+                    <th className="px-2 pb-1.5 text-right font-medium">Past SLA</th>
+                    <th className="pb-1.5 pl-2 text-right font-medium">Rotting</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pipelineHealth.map((r) => (
+                    <tr key={r.key} className="border-t border-app">
+                      <td className="py-1.5 pr-2">
+                        <Link href={`/leads?stage=${encodeURIComponent(r.key)}`} className="hover:underline">
+                          {r.label}
+                        </Link>
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{r.count}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {r.avgDays}d <span className="text-muted">/ {r.slaDays}d</span>
+                      </td>
+                      <td
+                        className={cn(
+                          "px-2 py-1.5 text-right tabular-nums",
+                          r.warning > 0 && "text-amber-600 dark:text-amber-400",
+                        )}
+                      >
+                        {r.warning || "—"}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-1.5 pl-2 text-right tabular-nums",
+                          r.rotting > 0 && "text-red-600 dark:text-red-400",
+                        )}
+                      >
+                        {r.rotting || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Panel>
       </div>
 

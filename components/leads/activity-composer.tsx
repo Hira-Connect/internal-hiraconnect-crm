@@ -42,6 +42,7 @@ export function ActivityComposer({ leadId }: { leadId: string }) {
 
   const isTask = type === "Task";
   const isNote = type === "Note";
+  const isMeeting = type === "Meeting";
 
   const submit = () => {
     run(
@@ -51,7 +52,7 @@ export function ActivityComposer({ leadId }: { leadId: string }) {
           notes,
           outcome: isTask || isNote ? null : outcome,
           direction: isTask || isNote ? null : direction,
-          dueDate: isTask ? dueDate || null : null,
+          dueDate: isTask || isMeeting ? dueDate || null : null,
           nextAction: nextAction.trim() ? nextAction.trim() : undefined,
           nextActionDate: nextDate || undefined,
         }),
@@ -97,6 +98,17 @@ export function ActivityComposer({ leadId }: { leadId: string }) {
       />
 
       <div className="mb-2 flex flex-wrap gap-2">
+        {isMeeting && (
+          <label className="flex items-center gap-2 text-xs text-muted">
+            Scheduled for
+            <Input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className="w-auto px-2 py-1 text-xs"
+            />
+          </label>
+        )}
         {isTask ? (
           <label className="flex items-center gap-2 text-xs text-muted">
             Due

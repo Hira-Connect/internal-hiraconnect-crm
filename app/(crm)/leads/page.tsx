@@ -7,9 +7,9 @@ export const metadata: Metadata = { title: "Leads" };
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ owner?: string; q?: string }>;
+  searchParams: Promise<{ owner?: string; q?: string; grade?: string; stage?: string }>;
 }) {
-  const { owner, q } = await searchParams;
+  const { owner, q, grade, stage } = await searchParams;
   const [me, leads, stages, profiles, companies, lostReasons] = await Promise.all([
     requireProfile(),
     getLeads(),
@@ -37,6 +37,8 @@ export default async function LeadsPage({
         lostReasons={lostReasons}
         initialOwner={owner}
         initialQuery={q}
+        initialGrade={grade}
+        initialStage={stage}
       />
     </div>
   );
