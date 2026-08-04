@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/*.test.ts",
+    "test": "tsx --conditions=react-server --test lib/*.test.ts",
     "setup:user": "tsx scripts/setup-user.ts",
     "mail:test": "tsx --conditions=react-server scripts/test-email.ts",
     "db:push": "supabase db push",
@@ -21,6 +21,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
+    "exceljs": "^4.4.0",
     "next": "16.2.12",
     "nodemailer": "^9.0.3",
     "react": "19.2.4",

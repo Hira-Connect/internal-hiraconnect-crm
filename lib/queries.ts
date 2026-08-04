@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "./supabase/server";
 import { createAdminClient } from "./supabase/admin";
 import { DEFAULT_STAGES } from "./stages";
+import type { ImportBatchRow, ImportRowRecord, RowStatus } from "./import/types";
 import type {
   AccountState,
   ActivityRow,
@@ -247,6 +248,41 @@ export const getTargets = cache(async (): Promise<MonthlyTarget[]> => {
     .order("metric");
   return (data ?? []) as MonthlyTarget[];
 });
+
+/* --------------------------------------------------------- lead imports */
+
+/** Upload history. Everyone sees their own; managers and admins see the team's —
+ *  the RLS policy decides, this just asks. */
+export const getImportBatches = cache(async (limit = 25): Promise<ImportBatchRow[]> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("lead_import_batches")
+    .select("*, creator:profiles!lead_import_batches_created_by_fkey(id,full_name,email)")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as unknown as ImportBatchRow[];
+});
+
+export const getImportBatch = cache(async (id: string): Promise<ImportBatchRow | null> => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("lead_import_batches")
+    .select("*, creator:profiles!lead_import_batches_created_by_fkey(id,full_name,email)")
+    .eq("id", id)
+    .maybeSingle();
+  return (data as unknown as ImportBatchRow) ?? null;
+});
+
+/** Rows of one upload, newest problems first when a status filter is given. */
+export const getImportRows = cache(
+  async (batchId: string, statuses?: RowStatus[], limit = 2000): Promise<ImportRowRecord[]> => {
+    const supabase = await createClient();
+    let q = supabase.from("lead_import_rows").select("*").eq("batch_id", batchId);
+    if (statuses?.length) q = q.in("status", statuses);
+    const { data } = await q.order("row_number").limit(limit);
+    return (data ?? []) as unknown as ImportRowRecord[];
+  },
+);
 
 /* --------------------------------------------------------- notifications */
 

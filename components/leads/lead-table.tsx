@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { bulkAssign, bulkSetStage, setNextAction } from "@/lib/actions/leads";
 import { logActivity } from "@/lib/actions/activities";
-import { Badge, Button, EmptyState, Input, Select } from "@/components/ui/primitives";
+import { Badge, Button, EmptyState, Input, LinkButton, Select } from "@/components/ui/primitives";
 import { actionErrorClass, useAction } from "@/components/ui/use-action";
 import { GradeBadge, RotBadge } from "./badges";
 import { StageControl } from "./stage-control";
@@ -202,6 +202,9 @@ export function LeadTable({
         </Select>
 
         <LeadDialog companies={companies} profiles={profiles} me={me} stages={stages} existingLeads={leads} />
+        <LinkButton href="/leads/import" variant="secondary" size="sm">
+          Bulk upload
+        </LinkButton>
       </div>
 
       {/* --------------------------------------------------------- bulk bar */}
