@@ -14,9 +14,18 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
 
-  /** nodemailer is only reached through a dynamic import in lib/email/send.ts;
-   *  leaving it external keeps the bundler from tracing its optional deps. */
-  serverExternalPackages: ["nodemailer"],
+  /** Both are reached only through a dynamic import on the server (nodemailer in
+   *  lib/email/send.ts, exceljs in lib/import/workbook.ts); leaving them external
+   *  keeps the bundler from tracing their optional deps. */
+  serverExternalPackages: ["nodemailer", "exceljs"],
+
+  experimental: {
+    /** An uploaded lead workbook arrives through a server action, and the default
+     *  1 MB action body would refuse a perfectly ordinary 3,000-row sheet. The
+     *  real limit is MAX_FILE_BYTES in lib/import/schema.ts, checked server-side;
+     *  this only has to be larger than that. */
+    serverActions: { bodySizeLimit: "8mb" },
+  },
 
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];

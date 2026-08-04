@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "../supabase/server";
 import { DEFAULT_STAGES } from "../stages";
@@ -16,33 +17,42 @@ export function ok<T>(data?: T): ActionResult<T> {
   return { ok: true, data };
 }
 
-/** Resolves the caller once per action. Never trust a user id from the client. */
-export async function currentActor(): Promise<{
-  supabase: SupabaseClient;
-  profile: Profile | null;
-  userId: string | null;
-  email: string | null;
-}> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { supabase, profile: null, userId: null, email: null };
+/** Resolves the caller once per action. Never trust a user id from the client.
+ *
+ *  `cache` dedupes this for the whole request, which matters where one request
+ *  drives many writes — a bulk stage change, or a chunk of an Excel import —
+ *  because `auth.getUser()` is a network round-trip to the auth server, not a
+ *  local token decode. */
+export const currentActor = cache(
+  async (): Promise<{
+    supabase: SupabaseClient;
+    profile: Profile | null;
+    userId: string | null;
+    email: string | null;
+  }> => {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { supabase, profile: null, userId: null, email: null };
 
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
-  return {
-    supabase,
-    profile: (data as Profile) ?? null,
-    userId: user.id,
-    email: user.email ?? null,
-  };
-}
+    const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+    return {
+      supabase,
+      profile: (data as Profile) ?? null,
+      userId: user.id,
+      email: user.email ?? null,
+    };
+  },
+);
 
-export async function loadStages(supabase: SupabaseClient): Promise<Stage[]> {
+/** Cached per request for the same reason: scoring one lead loads the stage table,
+ *  and an import scores every row it touches. */
+export const loadStages = cache(async (supabase: SupabaseClient): Promise<Stage[]> => {
   const { data, error } = await supabase.from("stages").select("*").order("sort");
   if (error || !data?.length) return DEFAULT_STAGES;
   return data as Stage[];
-}
+});
 
 /** Recomputes fit + engagement for one lead and persists the result.
  *  A score-history row is written only when the number actually moves, so the

@@ -48,6 +48,7 @@ app/
     layout.tsx          top nav, ⌘K palette, notifications, user menu
     page.tsx            dashboard — follow-up queue, hot leads, tasks, targets, trend
     leads/              list with filters + bulk actions; [id] detail with timeline
+      import/           bulk Excel upload — template, validation preview, chunked processing
     pipeline/           drag-and-drop kanban with SLA/rotting indicators
     companies/          accounts + firmographics (feeds the fit score)
     contacts/           people, separate from opportunities
@@ -62,6 +63,8 @@ lib/
   auth-links.ts         builds the one-time /auth/confirm links we email
   queries.ts            all server-side reads (React `cache`d per render)
   actions/              server actions — the only write path
+  import/               bulk upload: column contract, cell parsing, row validation,
+                        create-vs-update planning (pure, tested), xlsx read/write
   scoring.ts            fit + engagement scoring (pure, tested)
   stages.ts             stage config, SLA, rotting, weighted value (pure, tested)
   analytics.ts          funnel, velocity, ROI, leaderboard (pure, tested)
@@ -95,6 +98,73 @@ its SLA turns amber; past double, red. Probability drives the weighted pipeline 
 Every stage change writes three things — the lead's new state, a `stage_history` row (with days spent in
 the previous stage), and a `StageChange` activity. **Lost and Delayed require a reason**, enforced in both
 the action and the UI, which is what makes the "why we lose" report trustworthy.
+
+---
+
+## Bulk lead upload
+
+**Leads → Bulk upload** takes an Excel file and turns it into leads: download the template, fill it in,
+upload it, review exactly what will happen, then confirm.
+
+The template ([`lib/import/schema.ts`](lib/import/schema.ts) is the single definition of its columns) is
+generated per request, so its Stage and Owner dropdowns always match the stages that exist and the people
+you are allowed to assign to. Its header row is locked — the processor matches columns by name, and a
+renamed header is the one edit that would silently break an upload.
+
+**Nothing is written until you confirm.** Validation runs first and reports, per row, whether it would
+create a lead, update one, be skipped, or be rejected — with the Excel row number, the column at fault and
+what to do about it.
+
+### How a row is matched
+
+| Cell | Effect |
+|---|---|
+| **Lead ID** filled | Updates exactly that lead |
+| **Email** matches an existing lead | Updates that lead — case-insensitive, the same rule `convertSignup` uses |
+| Neither matches | Creates a new lead |
+
+Email is the business key, so it is **never overwritten in bulk**: a row that addresses a lead by its id and
+carries a different email is rejected rather than silently rewriting the identity of the record. On an
+update a blank cell means *leave this as it is*, so a sheet that only fills in phone numbers changes only
+phone numbers. A row that repeats what is already stored is skipped rather than rewritten.
+
+Duplicates are caught in three places: twice inside one file (the second row is skipped and told which row
+won), against leads you can see, and against leads you cannot — if a colleague already owns that address the
+row is skipped with a note to ask a manager, and nothing about their lead is disclosed.
+
+### Rules it will not bend
+
+Rows are written through the same server actions the UI uses — `createLead`, `updateLead`, `changeStage`,
+`assignOwner`, `createCompany`, `logActivity` — so scoring, `stage_history`, the `StageChange` activity, the
+owner's notification and RLS all behave exactly as they do for a hand-typed lead. Consequently:
+
+- a new lead cannot start in Won or Lost (close it from the lead page, which records the reason);
+- moving an existing lead to **Lost** or **Delayed** still requires a reason;
+- only managers and admins can set **Owner Email** to somebody else;
+- a company named in the sheet that does not exist yet is created.
+
+### Failure, resume and retry
+
+Processing runs in chunks, and the progress bar counts real rows, not time. Every row's outcome is stored in
+`lead_import_rows`, so a dropped connection or a closed tab loses nothing: **Continue** picks up at the first
+unprocessed row. **Retry failed rows** re-runs only the rows the database refused — rows that already
+succeeded are never touched again, because the lead id is written the moment the lead exists and a retry
+updates that lead rather than creating a twin.
+
+Re-uploading the same file is safe by design. Rows with an email match the lead they created; rows without
+one are matched on a stored business key (name + company + phone) and skipped as *already imported*.
+
+**Download error report** produces the rejected, skipped and failed rows in the template's own columns, with
+the reason and the fix in three extra columns the importer ignores — correct the cells and upload that same
+file again.
+
+Every upload is recorded in `lead_import_batches` (who, when, file name, counts per outcome, status, first
+failed row, last row written, duration), listed under the wizard. **The uploaded file itself is never
+stored** — only the sanitized cell values — so there is no file to secure and no storage URL to leak.
+
+Limits and guards: `.xlsx` only (checked by extension *and* by the file's leading bytes), 5 MB, 5,000 rows,
+and any cell that starts like a formula (`=`, `@`, `+cmd`) is refused rather than stored and handed back in a
+later export. A live formula contributes its cached result, never its expression.
 
 ---
 
@@ -238,6 +308,9 @@ and idempotent. They run in this order, and the order matters:
 5. `20260802120000_profile_guard_service_role.sql` — lets the service-role key through the privilege guard.
    Without it the guard reverts role/team/is\_active writes made with that key **and reports no error**, so
    `setup:user --role admin` silently did nothing on an account that already had a profile row
+6. `20260804120000_lead_imports.sql` — `lead_import_batches` and `lead_import_rows`, the audit and resume
+   state behind [Bulk lead upload](#bulk-lead-upload). Additive: two new tables, nothing existing is touched.
+   Until it is applied the CRM works as before and **Leads → Bulk upload** says so instead of failing
 
 Step 2 must run before step 3 or the team locks itself out. If scoped access causes a problem, restore the
 previous behaviour with `supabase/rollback/v2_rls_down.sql` — it touches policies only, never data.
